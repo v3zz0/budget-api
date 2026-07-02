@@ -1,0 +1,33 @@
+{
+  "kind": "collectionType",
+  "collectionName": "salvadanaios",
+  "info": {
+    "singularName": "salvadanaio",
+    "pluralName": "salvadanaios",
+    "displayName": "Salvadanaio"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "mese": {
+      "type": "date"
+    },
+    "budgetAllocato": {
+      "type": "integer"
+    },
+    "speso": {
+      "type": "decimal"
+    },
+    "risparmiato": {
+      "type": "decimal"
+    },
+    "wallet": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::wallet.wallet",
+      "inversedBy": "salvadanaios"
+    }
+  }
+}

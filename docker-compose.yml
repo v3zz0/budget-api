@@ -1,0 +1,19 @@
+version: "3"
+
+services:
+  api:
+    container_name: budget-api
+    # Build locale dall'immagine di questo repo.
+    # In produzione puoi sostituire con `image: <tuo-registry>/budget-api:<tag>`.
+    build: .
+    restart: unless-stopped
+    # Tutte le variabili (segreti, credenziali DB, Ollama) arrivano da .env
+    # (copia .env.example in .env e compilalo). .env NON è versionato.
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./data/uploads:/opt/app/public/uploads
+    ports:
+      - "1337:1337"

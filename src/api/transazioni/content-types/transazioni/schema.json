@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "transazionis",
+  "info": {
+    "singularName": "transazioni",
+    "pluralName": "transazionis",
+    "displayName": "Transazioni"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Importo": {
+      "type": "decimal"
+    },
+    "Descrizione": {
+      "type": "string"
+    },
+    "Data": {
+      "type": "date"
+    },
+    "categorie": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::categorie.categorie",
+      "inversedBy": "transazionis"
+    },
+    "TransazioneRicorrente": {
+      "type": "boolean",
+      "default": false
+    },
+    "RicorrenzaTemporale": {
+      "type": "date"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "categories",
+  "info": {
+    "singularName": "categorie",
+    "pluralName": "categories",
+    "displayName": "Categorie"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "Nome": {
+      "type": "string"
+    },
+    "Budget_categoria": {
+      "type": "decimal"
+    },
+    "wallet": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::wallet.wallet",
+      "inversedBy": "categories"
+    },
+    "transazionis": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::transazioni.transazioni",
+      "mappedBy": "categorie"
+    },
+    "icona": {
+      "type": "string"
+    }
+  }
+}

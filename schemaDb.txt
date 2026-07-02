@@ -1,0 +1,73 @@
+================================================================================
+SCHEMA DATABASE STRAPI - BUDGET APP
+================================================================================
+
+--------------------------------------------------------------------------------
+1. WALLETS (Portafogli)
+--------------------------------------------------------------------------------
+- id (auto)
+- name (Text, required, unique) - es. "Personale", "Casa"
+- monthly_budget (Decimal, required) - es. 400.00
+- color (Text, optional) - es. "#3B82F6"
+- is_active (Boolean, default: true)
+- created_at (auto)
+- updated_at (auto)
+-Salvadanaio
+
+Relazioni:
+- categories: has many Categories
+
+--------------------------------------------------------------------------------
+2. CATEGORIES (Categorie)
+--------------------------------------------------------------------------------
+- id (auto)
+- name (Text, required) - es. "Ristoranti", "Mutuo"
+- monthly_budget (Decimal, required) - es. 200.00
+- wallet (Relation, required) - many-to-one -> Wallets
+- is_recurring (Boolean, default: false)
+- color (Text, optional) - es. "#EF4444"
+- created_at (auto)
+- updated_at (auto)
+
+Relazioni:
+- wallet: belongs to Wallets (many-to-one)
+- transactions: has many Transactions
+
+Validazioni:
+- name unique dentro stesso wallet
+
+--------------------------------------------------------------------------------
+3. TRANSACTIONS (Transazioni)
+--------------------------------------------------------------------------------
+- id (auto)
+- amount (Decimal, required) - es. 45.50
+- description (Text, optional) - es. "Cena pizzeria"
+- date (Date, required) - es. "2025-01-15"
+- category (Relation, required) - many-to-one -> Categories
+- is_recurring (Boolean, default: false)
+- recurring_day (Integer, optional, 1-31) - giorno del mese
+- created_at (auto)
+- updated_at (auto)
+
+Relazioni:
+- category: belongs to Categories (many-to-one)
+
+
+
+================================================================================
+LOGICA AUTOMATISMI
+================================================================================
+
+1. TRANSAZIONI RICORRENTI (cron job - 1° del mese ore 00:01):
+   - Query Categories con is_recurring = true
+   - Per ogni categoria: duplica ultima transazione ricorrente
+   - Nuova data = recurring_day del mese corrente
+   - is_auto_generated = true
+
+2. CALCOLO SALVADANAIO (fine mese o on-demand):
+   - Per ogni Category:
+     * amount_spent = SUM(transactions.amount WHERE month(date) = mese)
+     * amount_saved = monthly_budget - amount_spent
+     * Se > 0: crea record Salvadanaio
+
+================================================================================
