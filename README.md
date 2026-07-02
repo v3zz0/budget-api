@@ -6,6 +6,30 @@ categorie di spesa, transazioni e un "salvadanaio" che traccia i risparmi mese p
 Questo repository contiene il **backend Strapi 5** ed è anche la **guida d'installazione
 dell'intero progetto** (backend + web + app Android).
 
+## ✨ Funzionalità
+
+- 💼 **Multi-portafoglio** — più portafogli indipendenti (es. Casa, Affitto, Spese Personali), ognuno con il proprio budget mensile e selezione rapida.
+- 📊 **Dashboard mensile** — per ogni categoria vedi *Budget / Speso / Rimanente* con barra di avanzamento; navighi tra i mesi; i valori sforati diventano rossi; espandi una categoria per vederne le transazioni.
+- 🏷️ **Categorie con budget e icone** — ogni categoria ha budget mensile, icona e ricorrenza.
+- ➕ **Transazioni rapide** — importo, categoria, data, descrizione opzionale e toggle *ricorrente* (si ripete ogni mese).
+- 🐷 **Salvadanaio** — traccia i risparmi mese per mese (`budget − speso`) con totale storico; snapshot mensile automatico via cron Strapi.
+- 🤖 **Analisi estratto conto (AI)** — carichi il PDF della banca e un LLM locale (Ollama) lo confronta con le transazioni registrate: evidenzia sforamenti, transazioni mancanti e dà un giudizio sintetico.
+- 🔔 **Notifiche** — promemoria degli addebiti ricorrenti a un orario configurabile.
+- ⚙️ **Impostazioni** — gestisci portafogli (nome, budget) e categorie (crea, modifica, elimina anche in multi-selezione).
+- 📤 **Export CSV** dei dati.
+- 🔐 **Autenticazione JWT** — login sicuro, multi-dispositivo.
+- 🌙 **UI dark, stile banking moderno.**
+
+## 📸 Screenshot
+
+| Dashboard | Salvadanaio | Nuova transazione |
+|---|---|---|
+| ![Dashboard](screenshots/dashboard.png) | ![Salvadanaio](screenshots/salvadanaio.png) | ![Nuova transazione](screenshots/nuova-transazione.png) |
+
+| Analisi estratto conto (AI) | Impostazioni |
+|---|---|
+| ![Analisi estratto conto](screenshots/analisi.png) | ![Impostazioni](screenshots/impostazioni.png) |
+
 ## 🏗️ Architettura
 
 Il progetto è diviso in **tre repository**:
