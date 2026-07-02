@@ -24,11 +24,11 @@ dell'intero progetto** (backend + web + app Android).
 
 | Dashboard | Salvadanaio | Nuova transazione |
 |---|---|---|
-| ![Dashboard](screenshots/dashboard.png) | ![Salvadanaio](screenshots/salvadanaio.png) | ![Nuova transazione](screenshots/nuova-transazione.png) |
+| ![Dashboard](screenshots/dashboard.jpg) | ![Salvadanaio](screenshots/salvadanaio.jpg) | ![Nuova transazione](screenshots/nuova-transazione.jpg) |
 
 | Analisi estratto conto (AI) | Impostazioni |
 |---|---|
-| ![Analisi estratto conto](screenshots/analisi.png) | ![Impostazioni](screenshots/impostazioni.png) |
+| ![Analisi estratto conto](screenshots/analisi.jpg) | ![Impostazioni](screenshots/impostazioni.jpg) |
 
 ## 🏗️ Architettura
 
