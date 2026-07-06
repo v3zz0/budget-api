@@ -50,16 +50,31 @@ module.exports = {
         return ctx.badRequest('mese deve essere in formato YYYY-MM');
       }
       if (!files || !files.pdf) {
-        return ctx.badRequest('File PDF mancante (campo "pdf")');
+        return ctx.badRequest('Nessun documento caricato (campo "pdf")');
       }
 
-      const pdfFile = Array.isArray(files.pdf) ? files.pdf[0] : files.pdf;
-      const pdfPath = pdfFile.filepath || pdfFile.path;
+      // Supporta 1..N documenti (PDF o CSV) caricati sotto il campo "pdf".
+      const lista = Array.isArray(files.pdf) ? files.pdf : [files.pdf];
+      const daPulire = [];
+      const testi = [];
+      for (const f of lista) {
+        const p = f.filepath || f.path;
+        daPulire.push(p);
+        const nome = (f.originalFilename || f.name || '').toLowerCase();
+        let testo;
+        if (nome.endsWith('.pdf')) {
+          testo = await pdfParser.estraiTesto(p);
+        } else {
+          // CSV o testo semplice: lo passiamo direttamente all'LLM
+          testo = fs.readFileSync(p, 'utf8');
+        }
+        testi.push(`### Documento: ${f.originalFilename || f.name || 'documento'}\n${testo}`);
+      }
 
-      // 1. Estrazione testo PDF
-      const testoEstratto = await pdfParser.estraiTesto(pdfPath);
+      // 1. Testo combinato di tutti i documenti
+      const testoEstratto = testi.join('\n\n');
 
-      // 2. Validazione periodo
+      // 2. Validazione periodo (dal testo combinato; per i CSV spesso assente → skip)
       const periodoEstratto = pdfParser.estraiPeriodo(testoEstratto);
       const validazione = validaMese(periodoEstratto, mese);
 
@@ -104,8 +119,10 @@ module.exports = {
         mancanti,
       });
 
-      // 8. Pulizia file temporaneo (best-effort)
-      try { fs.unlinkSync(pdfPath); } catch (_) {}
+      // 8. Pulizia file temporanei (best-effort)
+      for (const p of daPulire) {
+        try { fs.unlinkSync(p); } catch (_) {}
+      }
 
       return {
         mese,
