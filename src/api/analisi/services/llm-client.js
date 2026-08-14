@@ -201,6 +201,17 @@ Rispondi con JSON: { "giudizio": "testo qui" }`;
       }
     },
 
+    // Una domanda secca che torna { "testo": "..." }. I numeri stanno nel
+    // prompt già calcolati: il modello mette solo le parole.
+    async giudizioLibero(prompt) {
+      const raw = await chiamaLLM(prompt);
+      try {
+        return JSON.parse(raw).testo || '';
+      } catch (e) {
+        return '';
+      }
+    },
+
     // Usata dal bottone "Prova connessione" delle impostazioni.
     async ping() {
       const raw = await chiamaLLM('Rispondi con JSON: { "ok": true }');

@@ -13,6 +13,20 @@ const pdfParser = pdfParserFactory();
 const diffEngine = diffFactory();
 const sellaParser = sellaFactory();
 
+// Verifica che il wallet sia dell'utente che sta chiamando.
+// Senza questo controllo un utente autenticato potrebbe passare il walletId di
+// un altro e farsi restituire le sue categorie, transazioni e sforamenti.
+// Stesso schema usato in categorie/transazioni.
+async function walletDelloUtente(documentId, userId) {
+  const entry = await strapi.documents('api::wallet.wallet').findOne({
+    documentId,
+    populate: { users_permissions_user: true },
+  });
+  if (!entry || !entry.users_permissions_user) return null;
+  if (entry.users_permissions_user.id !== userId) return null;
+  return entry;
+}
+
 // Impostazioni AI dell'utente (scelte dall'app). Se non ha mai configurato
 // niente resta il comportamento storico: Ollama con le variabili d'ambiente.
 function configAi(user) {
@@ -63,6 +77,12 @@ module.exports = {
       }
       if (!/^\d{4}-\d{2}$/.test(mese)) {
         return ctx.badRequest('mese deve essere in formato YYYY-MM');
+      }
+
+      const userId = ctx.state.user && ctx.state.user.id;
+      if (!userId) return ctx.unauthorized();
+      if (!(await walletDelloUtente(walletId, userId))) {
+        return ctx.notFound('Portafoglio non trovato');
       }
       if (!files || !files.pdf) {
         return ctx.badRequest('Nessun documento caricato (campo "pdf")');

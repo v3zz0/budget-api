@@ -13,7 +13,7 @@ dell'intero progetto** (backend + web + app Android).
 - 🏷️ **Categorie con budget e icone** — ogni categoria ha budget mensile, icona e ricorrenza.
 - ➕ **Transazioni rapide** — importo, categoria, data, descrizione opzionale e toggle *ricorrente* (si ripete ogni mese).
 - 🐷 **Salvadanaio** — traccia i risparmi mese per mese (`budget − speso`) con totale storico; snapshot mensile automatico via cron Strapi.
-- 🤖 **Analisi estratto conto (AI)** — carichi il PDF della banca e un LLM locale (Ollama) lo confronta con le transazioni registrate: evidenzia sforamenti, transazioni mancanti e dà un giudizio sintetico.
+- 🤖 **Analisi estratto conto** — carichi il PDF (o CSV) della banca e viene confrontato con le transazioni registrate: sforamenti, movimenti mancanti e un giudizio sintetico. I movimenti si leggono con un parser esatto quando il formato è riconosciuto, altrimenti ci pensa un LLM. Vedi [Estratti conto e banche](#-estratti-conto-e-banche).
 - 🔔 **Notifiche** — promemoria degli addebiti ricorrenti a un orario configurabile.
 - ⚙️ **Impostazioni** — gestisci portafogli (nome, budget) e categorie (crea, modifica, elimina anche in multi-selezione).
 - 📤 **Export CSV** dei dati.
@@ -86,6 +86,43 @@ npm run develop
 Admin panel: **http://localhost:1337/admin** (al primo avvio crei l'utente amministratore).
 API REST: **http://localhost:1337/api**
 
+---
+
+## 🔑 Permessi (passaggio obbligatorio)
+
+Strapi crea le tabelle da solo al primo avvio, ma **tiene tutte le API chiuse**.
+Finché non abiliti i permessi, l'app risponde `403 Forbidden` a ogni chiamata,
+senza spiegare il motivo. È il primo scoglio di chiunque clona il progetto.
+
+Nel pannello admin: **Settings → Users & Permissions plugin → Roles → Authenticated**,
+poi spunta queste voci e premi **Save**:
+
+| Sezione | Voci da abilitare |
+|---|---|
+| **Wallet** | `find`, `findOne`, `create`, `update`, `delete` |
+| **Categorie** | `find`, `findOne`, `create`, `update`, `delete` |
+| **Transazioni** | `find`, `findOne`, `create`, `update`, `delete` |
+| **Salvadanaio** | `find`, `findOne`, `create`, `update`, `delete` |
+| **Analisi** | `analizza`, `testAi` |
+| **Consiglio** | `find`, `findOne`, `applica`, `segna` |
+| **Users-permissions → User** | `me`, `update` |
+
+Il ruolo **Public** non serve: tutte le rotte richiedono un utente autenticato.
+
+> I controller filtrano comunque per utente: ognuno vede solo i wallet propri e
+> ciò che vi appartiene. Abilitare i permessi non espone i dati altrui.
+
+### Creare il primo utente dell'app
+
+L'utente dell'admin panel **non** è un utente dell'app. Registra il tuo dalla
+schermata di login dell'app, oppure via API:
+
+```bash
+curl -X POST http://localhost:1337/api/auth/local/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"mario","email":"mario@esempio.it","password":"unaPasswordSolida"}'
+```
+
 ### Variabili d'ambiente (`.env`)
 
 Copiate da `.env.example`. **Nessun valore va committato** (`.env` è in `.gitignore`).
@@ -142,13 +179,59 @@ Dettagli nel [README di budget-app](https://github.com/v3zz0/budget-app).
 git clone https://github.com/v3zz0/budget-flutter.git
 cd budget-flutter
 flutter pub get
-
-# L'URL del backend si passa a build/run time:
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:1337        # emulatore Android
-flutter build apk --release --dart-define=API_BASE_URL=https://tuo-backend
+flutter build apk --release --split-per-abi
 ```
 
+**L'indirizzo del backend si inserisce nell'app**, nel campo *Server* della
+schermata di login: non serve ricompilare per puntare al proprio Strapi.
+Resta salvato sul telefono e si può cambiare quando si vuole.
+
+In sviluppo puoi comunque precompilarlo:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:1337   # emulatore Android
+```
+
+Per distribuire un APK serve una chiave di firma tua: vedi
+`android/key.properties.example` nel repo dell'app. Senza, la release viene
+firmata con la chiave di debug (va bene per provare, non per distribuire).
+
 Guida build APK completa nel [README di budget-flutter](https://github.com/v3zz0/budget-flutter).
+
+---
+
+## 🏦 Estratti conto e banche
+
+L'analisi legge i movimenti in due modi, nell'ordine:
+
+1. **Parser esatto.** Se il documento ha un formato riconosciuto, i movimenti si
+   estraggono con una regex: istantaneo, ripetibile, nessun rischio che una riga
+   venga saltata o inventata. Oggi c'è
+   [`sella-parser.js`](src/api/analisi/services/sella-parser.js) per Banca Sella
+   (PDF ed export CSV).
+2. **LLM di riserva.** Se nessun parser riconosce il documento, il testo va al
+   modello configurato (Ollama o un servizio compatibile OpenAI, es. OpenRouter).
+   Funziona con qualsiasi banca, ma è lento e può sbagliare: verifica sempre i
+   risultati.
+
+Nel report il campo `fonte` dice quale strada è stata usata
+(`sella-parser`, `llm`, o entrambe se hai caricato più documenti).
+
+### Scrivere il parser della tua banca
+
+Il modo migliore per contribuire. Serve un file che esponga `parse(testo)` e
+restituisca un array di `{ data: 'YYYY-MM-DD', importo, descrizione }` con i soli
+addebiti (importo positivo). `sella-parser.js` è il modello da copiare: 70 righe.
+
+Due accorgimenti che fanno la differenza:
+
+- **Pretendi i due decimali nell'importo** (`,dd`): scarta da solo numeri di
+  conto, date e conteggi che altrimenti verrebbero letti come cifre.
+- **Verifica il totale.** Se l'estratto stampa un totale, controlla che la somma
+  dei movimenti estratti coincida: è la prova che non ne hai persi.
+
+Il motore AI si sceglie dall'app in **Impostazioni → Analisi AI** (indirizzo,
+modello e chiave API); i valori in `.env` restano il default.
 
 ---
 

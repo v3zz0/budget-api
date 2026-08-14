@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "consiglios",
+  "info": {
+    "singularName": "consiglio",
+    "pluralName": "consiglios",
+    "displayName": "Consiglio"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "tipo": {
+      "type": "enumeration",
+      "enum": ["alza", "abbassa"]
+    },
+    "budgetAttuale": {
+      "type": "decimal"
+    },
+    "budgetProposto": {
+      "type": "decimal"
+    },
+    "mesiAnalizzati": {
+      "type": "json"
+    },
+    "testo": {
+      "type": "text"
+    },
+    "stato": {
+      "type": "enumeration",
+      "enum": ["nuovo", "letto", "applicato", "ignorato"],
+      "default": "nuovo"
+    },
+    "categorie": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::categorie.categorie"
+    }
+  }
+}
