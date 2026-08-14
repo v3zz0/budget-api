@@ -32,6 +32,10 @@
     },
     "RicorrenzaTemporale": {
       "type": "date"
+    },
+    "Contanti": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

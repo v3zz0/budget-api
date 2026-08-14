@@ -106,6 +106,7 @@ module.exports = {
                 Descrizione: t.Descrizione,
                 Data: `${anno}-${mese}-${giorno}`,
                 TransazioneRicorrente: false, // istanza materializzata, non un nuovo template
+                Contanti: t.Contanti || false, // una ricorrente in contanti resta in contanti
                 categorie: t.categorie.documentId,
               },
             });

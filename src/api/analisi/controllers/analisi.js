@@ -104,7 +104,11 @@ module.exports = {
       const transazioniBanca = await ollama.estraiTransazioni(testoEstratto, categorie);
 
       // 6. Diff e sforamenti
-      const { mancanti } = diffEngine.confronta(transazioniBanca, transazioniDB);
+      // I contanti non passano dal conto: escluderli dal confronto, altrimenti
+      // rubano il match a un movimento bancario vero e lo nascondono dai mancanti.
+      // Restano invece negli sforamenti: sono spesa a tutti gli effetti.
+      const daConfrontare = transazioniDB.filter((t) => !t.Contanti);
+      const { mancanti } = diffEngine.confronta(transazioniBanca, daConfrontare);
       const sforamenti = diffEngine.calcolaSforamenti(transazioniDB, categorie);
 
       const totaleSpeso = sforamenti.reduce((s, c) => s + c.speso, 0);
