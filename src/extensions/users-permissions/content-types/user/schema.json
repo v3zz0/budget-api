@@ -68,6 +68,25 @@
     },
     "orarioNotifiche": {
       "type": "time"
+    },
+    "aiMotore": {
+      "type": "enumeration",
+      "enum": ["ollama", "openrouter", "telefono"],
+      "default": "ollama"
+    },
+    "aiUrl": {
+      "type": "string"
+    },
+    "aiModello": {
+      "type": "string"
+    },
+    "aiChiave": {
+      "type": "string",
+      "private": true
+    },
+    "aiChiaveImpostata": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

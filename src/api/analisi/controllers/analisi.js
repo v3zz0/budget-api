@@ -5,14 +5,24 @@ const fs = require('fs');
 
 // Istanzio direttamente i service tramite require — sono semplici factory
 const pdfParserFactory = require('../services/pdf-parser');
-const ollamaFactory = require('../services/ollama-client');
+const llmFactory = require('../services/llm-client');
 const diffFactory = require('../services/diff-engine');
 const sellaFactory = require('../services/sella-parser');
 
 const pdfParser = pdfParserFactory();
-const ollama = ollamaFactory();
 const diffEngine = diffFactory();
 const sellaParser = sellaFactory();
+
+// Impostazioni AI dell'utente (scelte dall'app). Se non ha mai configurato
+// niente resta il comportamento storico: Ollama con le variabili d'ambiente.
+function configAi(user) {
+  return {
+    motore: user?.aiMotore || 'ollama',
+    url: user?.aiUrl,
+    modello: user?.aiModello,
+    chiave: user?.aiChiave,
+  };
+}
 
 // "YYYY-MM" → { primoGiorno: "YYYY-MM-01", ultimoGiorno: "YYYY-MM-31" }
 function rangeMese(meseYYYYMM) {
@@ -44,6 +54,13 @@ module.exports = {
     try {
       const { walletId, mese } = ctx.request.body;
       const files = ctx.request.files;
+
+      // Impostazioni AI dell'utente loggato.
+      // Con motore "telefono" il modello gira sul dispositivo: qui saltiamo
+      // ogni chiamata a un LLM e restituiamo i dati grezzi, ci pensa l'app.
+      const ai = configAi(ctx.state.user);
+      const llm = llmFactory(ai);
+      const aiSulTelefono = ai.motore === 'telefono';
 
       if (!walletId || !mese) {
         return ctx.badRequest('walletId e mese sono obbligatori');
@@ -116,8 +133,13 @@ module.exports = {
         if (daParser.length) {
           transazioniBanca.push(...daParser);
           fonti.push('sella-parser');
+        } else if (aiSulTelefono) {
+          // Nessun parser e nessun LLM disponibile qui: l'estrazione da un
+          // formato sconosciuto non si può fare sul dispositivo (servirebbe
+          // tutto il PDF), quindi lo diciamo invece di restituire zero righe.
+          fonti.push('formato-non-riconosciuto');
         } else {
-          transazioniBanca.push(...(await ollama.estraiTransazioni(testo, categorie)));
+          transazioniBanca.push(...(await llm.estraiTransazioni(testo, categorie)));
           fonti.push('llm');
         }
       }
@@ -137,15 +159,15 @@ module.exports = {
       // Il parser estrae i numeri ma non sa cosa siano: la categoria la
       // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
       // descrizione, non l'estratto conto intero).
-      if (mancanti.some((m) => !m.categoriaSuggerita)) {
-        mancanti = await ollama.suggerisciCategorie(mancanti, categorie);
+      if (!aiSulTelefono && mancanti.some((m) => !m.categoriaSuggerita)) {
+        mancanti = await llm.suggerisciCategorie(mancanti, categorie);
       }
 
       const totaleSpeso = sforamenti.reduce((s, c) => s + c.speso, 0);
       const totaleBudget = sforamenti.reduce((s, c) => s + c.budget, 0);
 
-      // 7. Giudizio sintetico LLM
-      const giudizio = await ollama.giudizioMese({
+      // 7. Giudizio sintetico LLM (salta se lo genera il telefono)
+      const giudizio = aiSulTelefono ? '' : await llm.giudizioMese({
         mese,
         sforamenti,
         totaleSpeso: Number(totaleSpeso.toFixed(2)),
@@ -162,6 +184,9 @@ module.exports = {
         mese,
         walletId,
         fonte, // "sella-parser" oppure "llm": utile per capire cosa è successo
+        // true = categorie e giudizio mancano di proposito, li genera l'app
+        // con il modello sul dispositivo.
+        aiSulTelefono,
         validazione,
         periodoEstratto,
         sforamenti,
@@ -176,6 +201,34 @@ module.exports = {
     } catch (err) {
       strapi.log.error('Errore analisi estratto conto:', err);
       return ctx.internalServerError(err.message);
+    }
+  },
+
+  // Bottone "Prova connessione" delle impostazioni: usa i valori che l'utente
+  // sta digitando, non quelli salvati, così può testare prima di confermare.
+  async testAi(ctx) {
+    const { motore, url, modello, chiave } = ctx.request.body || {};
+    if (motore === 'telefono') {
+      return { ok: true, messaggio: 'Il modello gira sul dispositivo' };
+    }
+    try {
+      const llm = llmFactory({
+        motore,
+        url,
+        modello,
+        // Chiave vuota nel form = usa quella già salvata (non la rimandiamo
+        // mai all'app, quindi il campo arriva vuoto se non l'hai ritoccata).
+        chiave: chiave || ctx.state.user?.aiChiave,
+      });
+      const ok = await llm.ping();
+      return {
+        ok,
+        messaggio: ok
+          ? `${llm.motore} risponde (${llm.modello})`
+          : 'Risposta non valida dal modello',
+      };
+    } catch (err) {
+      return { ok: false, messaggio: err.message };
     }
   },
 };

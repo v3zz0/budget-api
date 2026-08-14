@@ -32,7 +32,7 @@ function toIso(s) {
 module.exports = () => ({
   /**
    * Estrae le USCITE dal testo di un estratto conto Banca Sella.
-   * Restituisce lo stesso formato di ollama-client.estraiTransazioni,
+   * Restituisce lo stesso formato di llm-client.estraiTransazioni,
    * così il diff-engine non si accorge della differenza.
    */
   parse(testo) {

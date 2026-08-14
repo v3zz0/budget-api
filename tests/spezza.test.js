@@ -5,7 +5,7 @@
 // un movimento si spacca fra due blocchi e nessuno dei due lo estrae.
 
 const assert = require('node:assert');
-const { spezza } = require('../src/api/analisi/services/ollama-client');
+const { spezza } = require('../src/api/analisi/services/llm-client');
 
 const righe = Array.from({ length: 100 }, (_, i) => `riga numero ${i} con del testo`);
 const testo = righe.join('\n');
