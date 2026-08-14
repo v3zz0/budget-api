@@ -71,7 +71,7 @@
     },
     "aiMotore": {
       "type": "enumeration",
-      "enum": ["ollama", "openrouter", "telefono"],
+      "enum": ["ollama", "openrouter"],
       "default": "ollama"
     },
     "aiUrl": {

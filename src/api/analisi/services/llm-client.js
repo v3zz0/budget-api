@@ -3,9 +3,8 @@
 // Client LLM per l'analisi estratto conto.
 // Il motore lo sceglie l'utente dalle impostazioni dell'app:
 //   - "ollama"     -> il server Ollama di casa (default, come prima)
-//   - "openrouter" -> API compatibile OpenAI, con chiave
-//   - "telefono"   -> qui non arriva mai: il controller salta la parte AI e
-//                     la fa l'app con il modello scaricato sul dispositivo.
+//   - "openrouter" -> API compatibile OpenAI, con chiave (OpenRouter o
+//                     qualsiasi altro servizio con lo stesso formato).
 
 const URL_DEFAULT = process.env.OLLAMA_URL || 'http://ollama:11434';
 const MODELLO_DEFAULT = process.env.OLLAMA_MODEL || 'qwen2.5:7b';

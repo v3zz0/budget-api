@@ -55,12 +55,8 @@ module.exports = {
       const { walletId, mese } = ctx.request.body;
       const files = ctx.request.files;
 
-      // Impostazioni AI dell'utente loggato.
-      // Con motore "telefono" il modello gira sul dispositivo: qui saltiamo
-      // ogni chiamata a un LLM e restituiamo i dati grezzi, ci pensa l'app.
-      const ai = configAi(ctx.state.user);
-      const llm = llmFactory(ai);
-      const aiSulTelefono = ai.motore === 'telefono';
+      // Motore AI scelto dall'utente nelle impostazioni dell'app.
+      const llm = llmFactory(configAi(ctx.state.user));
 
       if (!walletId || !mese) {
         return ctx.badRequest('walletId e mese sono obbligatori');
@@ -133,11 +129,6 @@ module.exports = {
         if (daParser.length) {
           transazioniBanca.push(...daParser);
           fonti.push('sella-parser');
-        } else if (aiSulTelefono) {
-          // Nessun parser e nessun LLM disponibile qui: l'estrazione da un
-          // formato sconosciuto non si può fare sul dispositivo (servirebbe
-          // tutto il PDF), quindi lo diciamo invece di restituire zero righe.
-          fonti.push('formato-non-riconosciuto');
         } else {
           transazioniBanca.push(...(await llm.estraiTransazioni(testo, categorie)));
           fonti.push('llm');
@@ -159,15 +150,15 @@ module.exports = {
       // Il parser estrae i numeri ma non sa cosa siano: la categoria la
       // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
       // descrizione, non l'estratto conto intero).
-      if (!aiSulTelefono && mancanti.some((m) => !m.categoriaSuggerita)) {
+      if (mancanti.some((m) => !m.categoriaSuggerita)) {
         mancanti = await llm.suggerisciCategorie(mancanti, categorie);
       }
 
       const totaleSpeso = sforamenti.reduce((s, c) => s + c.speso, 0);
       const totaleBudget = sforamenti.reduce((s, c) => s + c.budget, 0);
 
-      // 7. Giudizio sintetico LLM (salta se lo genera il telefono)
-      const giudizio = aiSulTelefono ? '' : await llm.giudizioMese({
+      // 7. Giudizio sintetico LLM
+      const giudizio = await llm.giudizioMese({
         mese,
         sforamenti,
         totaleSpeso: Number(totaleSpeso.toFixed(2)),
@@ -184,9 +175,6 @@ module.exports = {
         mese,
         walletId,
         fonte, // "sella-parser" oppure "llm": utile per capire cosa è successo
-        // true = categorie e giudizio mancano di proposito, li genera l'app
-        // con il modello sul dispositivo.
-        aiSulTelefono,
         validazione,
         periodoEstratto,
         sforamenti,
@@ -208,9 +196,6 @@ module.exports = {
   // sta digitando, non quelli salvati, così può testare prima di confermare.
   async testAi(ctx) {
     const { motore, url, modello, chiave } = ctx.request.body || {};
-    if (motore === 'telefono') {
-      return { ok: true, messaggio: 'Il modello gira sul dispositivo' };
-    }
     try {
       const llm = llmFactory({
         motore,
