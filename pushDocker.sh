@@ -8,7 +8,7 @@
 
 # ─── CONFIGURAZIONE ───────────────────────────────────────────────────────────
 IMAGE="ghcr.io/v3zz0/budget-api"
-VERSION="1.1"
+VERSION="1.2"
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -e
@@ -24,7 +24,9 @@ if ! sudo docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# Login a GHCR
+# Login a GHCR — token letto da ~/.ghcr-token (fuori dal repo, mai committato)
+[ -z "$GHCR_TOKEN" ] && [ -f ~/.ghcr-token ] && GHCR_TOKEN=$(< ~/.ghcr-token)
+
 if [ -n "$GHCR_TOKEN" ]; then
     echo "==> Login a ghcr.io (da GHCR_TOKEN)..."
     echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u v3zz0 --password-stdin

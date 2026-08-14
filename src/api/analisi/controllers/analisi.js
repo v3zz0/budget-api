@@ -7,10 +7,12 @@ const fs = require('fs');
 const pdfParserFactory = require('../services/pdf-parser');
 const ollamaFactory = require('../services/ollama-client');
 const diffFactory = require('../services/diff-engine');
+const sellaFactory = require('../services/sella-parser');
 
 const pdfParser = pdfParserFactory();
 const ollama = ollamaFactory();
 const diffEngine = diffFactory();
+const sellaParser = sellaFactory();
 
 // "YYYY-MM" → { primoGiorno: "YYYY-MM-01", ultimoGiorno: "YYYY-MM-31" }
 function rangeMese(meseYYYYMM) {
@@ -100,16 +102,32 @@ module.exports = {
         populate: ['categorie'],
       });
 
-      // 5. LLM estrae transazioni dal testo
-      const transazioniBanca = await ollama.estraiTransazioni(testoEstratto, categorie);
+      // 5. Estrazione movimenti.
+      // Il formato Banca Sella è una tabella regolare: la legge una regex,
+      // esatta e istantanea. L'LLM resta come rete per le altre banche, dove
+      // però può saltare o inventare righe.
+      let transazioniBanca = sellaParser.parse(testoEstratto);
+      let fonte = 'sella-parser';
+      if (!transazioniBanca.length) {
+        transazioniBanca = await ollama.estraiTransazioni(testoEstratto, categorie);
+        fonte = 'llm';
+      }
+      strapi.log.info(`Analisi: ${transazioniBanca.length} movimenti estratti da ${fonte}`);
 
       // 6. Diff e sforamenti
       // I contanti non passano dal conto: escluderli dal confronto, altrimenti
       // rubano il match a un movimento bancario vero e lo nascondono dai mancanti.
       // Restano invece negli sforamenti: sono spesa a tutti gli effetti.
       const daConfrontare = transazioniDB.filter((t) => !t.Contanti);
-      const { mancanti } = diffEngine.confronta(transazioniBanca, daConfrontare);
+      let { mancanti } = diffEngine.confronta(transazioniBanca, daConfrontare);
       const sforamenti = diffEngine.calcolaSforamenti(transazioniDB, categorie);
+
+      // Il parser estrae i numeri ma non sa cosa siano: la categoria la
+      // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
+      // descrizione, non l'estratto conto intero).
+      if (fonte === 'sella-parser' && mancanti.length) {
+        mancanti = await ollama.suggerisciCategorie(mancanti, categorie);
+      }
 
       const totaleSpeso = sforamenti.reduce((s, c) => s + c.speso, 0);
       const totaleBudget = sforamenti.reduce((s, c) => s + c.budget, 0);
@@ -131,6 +149,7 @@ module.exports = {
       return {
         mese,
         walletId,
+        fonte, // "sella-parser" oppure "llm": utile per capire cosa è successo
         validazione,
         periodoEstratto,
         sforamenti,
