@@ -102,17 +102,29 @@ module.exports = {
         populate: ['categorie'],
       });
 
-      // 5. Estrazione movimenti.
+      // 5. Estrazione movimenti, UN DOCUMENTO ALLA VOLTA.
       // Il formato Banca Sella è una tabella regolare: la legge una regex,
       // esatta e istantanea. L'LLM resta come rete per le altre banche, dove
       // però può saltare o inventare righe.
-      let transazioniBanca = sellaParser.parse(testoEstratto);
-      let fonte = 'sella-parser';
-      if (!transazioniBanca.length) {
-        transazioniBanca = await ollama.estraiTransazioni(testoEstratto, categorie);
-        fonte = 'llm';
+      // Documento per documento e non sul testo combinato: caricando un Sella
+      // insieme a un estratto di un'altra banca, il parser troverebbe i
+      // movimenti del primo e il secondo sparirebbe senza un avviso.
+      const transazioniBanca = [];
+      const fonti = [];
+      for (const testo of testi) {
+        const daParser = sellaParser.parse(testo);
+        if (daParser.length) {
+          transazioniBanca.push(...daParser);
+          fonti.push('sella-parser');
+        } else {
+          transazioniBanca.push(...(await ollama.estraiTransazioni(testo, categorie)));
+          fonti.push('llm');
+        }
       }
-      strapi.log.info(`Analisi: ${transazioniBanca.length} movimenti estratti da ${fonte}`);
+      const fonte = [...new Set(fonti)].join('+') || 'nessuna';
+      strapi.log.info(
+        `Analisi: ${transazioniBanca.length} movimenti da ${testi.length} documento/i (${fonte})`
+      );
 
       // 6. Diff e sforamenti
       // I contanti non passano dal conto: escluderli dal confronto, altrimenti
@@ -125,7 +137,7 @@ module.exports = {
       // Il parser estrae i numeri ma non sa cosa siano: la categoria la
       // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
       // descrizione, non l'estratto conto intero).
-      if (fonte === 'sella-parser' && mancanti.length) {
+      if (mancanti.some((m) => !m.categoriaSuggerita)) {
         mancanti = await ollama.suggerisciCategorie(mancanti, categorie);
       }
 

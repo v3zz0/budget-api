@@ -131,7 +131,8 @@ Usa il nome ESATTO di una categoria tra {${nomiCategorie}}, oppure "Altro".`;
       );
       return movimenti.map((m, i) => ({
         ...m,
-        categoriaSuggerita: perIndice.get(i) || 'Altro',
+        // Non sovrascrive un suggerimento già arrivato dall'estrazione.
+        categoriaSuggerita: perIndice.get(i) || m.categoriaSuggerita || 'Altro',
       }));
     } catch (e) {
       // Categoria mancante: la UI semplicemente non mostra il suggerimento.
