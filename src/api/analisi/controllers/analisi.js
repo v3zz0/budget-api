@@ -151,6 +151,23 @@ module.exports = {
           transazioniBanca.push(...daParser);
           fonti.push('sella-parser');
         } else {
+          // Perché il parser non l'ha riconosciuto? Senza queste righe il
+          // fallback all'AI è invisibile: l'analisi "funziona" ma ci mette
+          // minuti e legge meno movimenti, e non si capisce da dove venga.
+          // Le prime righe bastano a riconoscere il formato.
+          const campione = testo
+            .split('\n')
+            .map((r) => r.trim())
+            .filter(Boolean)
+            .slice(1, 6) // la [0] è l'intestazione "### Documento: ..."
+            .map((r) => r.slice(0, 90));
+          strapi.log.warn(
+            `Analisi: nessun parser riconosce questo documento, passo all'AI. Prime righe:\n  ${campione.join('\n  ')}`
+          );
+          avvisiExtra.push(
+            'Un documento non è in un formato riconosciuto: letto dall\'AI, che può saltare movimenti.'
+          );
+
           // Un documento che il modello non riesce a leggere non deve far
           // fallire anche gli altri: con due estratti caricati insieme, il
           // secondo va analizzato lo stesso.
