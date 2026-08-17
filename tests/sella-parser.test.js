@@ -57,3 +57,44 @@ const somma = m.reduce((s, x) => s + x.importo, 0);
 assert.strictEqual(Number(somma.toFixed(2)), 1779.36);
 
 console.log(`OK: ${m.length} movimenti, totale uscite ${somma.toFixed(2)} EUR`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formato senza spazi: è quello che pdf-parse produce davvero sui PDF Sella.
+// Con \s+ fra i campi il parser tornava 0 movimenti e l'estratto finiva
+// all'LLM, che ne trovava circa la metà.
+const SENZA_SPAZI = [
+  '2600143509689829/07/202631/07/2026COFFEE CAPP BY N AND I POGNANOEUR-4,00',
+  '2600141824819521/07/202621/07/2026POS 2106 CARDHOLDER ADJUSTMENTEUR+52,73',
+  '2600142080763918/07/202622/07/2026PAYPAL *ALIPAY EUR 17280818884EUR-20,36',
+  '2600140975468315/07/202615/07/2026',
+  'RATA MUTUO LUIGI GATTI A ALESSANDRO',
+  'VEZZOLI',
+  'EUR-555,00',
+  '2600139997123709/07/202609/07/2026RETRIBUZIONE GIUGNOEUR+1.487,00',
+].join('\n');
+
+const s = parser.parse(SENZA_SPAZI);
+
+// Le due righe con importo positivo sono accrediti: non sono spese.
+assert.strictEqual(s.length, 3, `attesi 3 movimenti, trovati ${s.length}`);
+
+assert.deepStrictEqual(s[0], {
+  data: '2026-07-29',
+  importo: 4,
+  descrizione: 'COFFEE CAPP BY N AND I POGNANO',
+});
+
+// Il codice identificativo non deve mangiarsi le cifre della data.
+assert.deepStrictEqual(s[1], {
+  data: '2026-07-18',
+  importo: 20.36,
+  descrizione: 'PAYPAL *ALIPAY EUR 17280818884',
+});
+
+assert.deepStrictEqual(s[2], {
+  data: '2026-07-15',
+  importo: 555,
+  descrizione: 'RATA MUTUO LUIGI GATTI A ALESSANDRO VEZZOLI',
+});
+
+console.log(`OK: formato senza spazi, ${s.length} movimenti`);

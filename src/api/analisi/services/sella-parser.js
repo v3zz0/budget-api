@@ -1,22 +1,31 @@
 'use strict';
 
 // Parser deterministico per la lista movimenti di Banca Sella.
-// Il PDF (e l'export CSV) hanno righe sempre nella stessa forma:
+// Il PDF (e l'export CSV) hanno righe sempre negli stessi campi:
 //
 //   26001435096898 29/07/2026 31/07/2026 COFFEE CAPP BY N AND I POGNANO EUR -4,00
 //   <codice>       <data op>  <valuta>   <descrizione>                  EUR <importo>
+//
+// Attenzione: gli spazi che vedi qui sopra sono un caso fortunato. pdf-parse
+// spesso restituisce i campi tutti attaccati, così:
+//
+//   2600143509689829/07/202631/07/2026COFFEE CAPP BY N AND I POGNANOEUR-4,00
+//
+// Per questo i separatori sono \s* e non \s+: con \s+ il parser non trovava
+// niente e l'intero estratto finiva all'LLM, un blocco alla volta — da
+// millisecondi a minuti, con il rischio di righe saltate o inventate.
 //
 // Essendo una tabella regolare non serve un LLM per leggerla: una regex la
 // estrae in millisecondi, sempre allo stesso modo, senza inventare nulla.
 
 // L'importo DEVE finire con ",dd": è questo vincolo a far funzionare la
 // descrizione non-greedy anche quando contiene la parola EUR, come in
-// "PAYPAL *ALIPAY EUR 17280818884 EUR -20,36".
+// "PAYPAL *ALIPAY EUR 17280818884EUR-20,36".
 const MOVIMENTO =
-  /^(\d{10,20})\s+(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+([\s\S]*?)\s+EUR\s+([+-]?[\d.]*\d,\d{2})/;
+  /^(\d{10,20})\s*(\d{2}\/\d{2}\/\d{4})\s*(\d{2}\/\d{2}\/\d{4})\s*([\s\S]*?)\s*EUR\s*([+-]?[\d.]*\d,\d{2})/;
 
 // Inizio di un nuovo movimento: codice identificativo + data operazione.
-const INIZIO = /^\d{10,20}\s+\d{2}\/\d{2}\/\d{4}/;
+const INIZIO = /^\d{10,20}\s*\d{2}\/\d{2}\/\d{4}/;
 
 // "1.487,00" -> 1487.00   "-4,00" -> -4
 function toNumero(s) {
