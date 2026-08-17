@@ -133,19 +133,34 @@ module.exports = (config = {}) => {
   // Il budget parte alla PRIMA chiamata, non alla creazione del client: il
   // controller istanzia l'LLM in cima e poi legge PDF e database, e quel tempo
   // non va addebitato al modello.
+  const budgetMs = Number(config.budgetMs) || BUDGET_MS;
   let fine = null;
   function msDisponibili() {
-    if (fine === null) fine = Date.now() + BUDGET_MS;
+    if (fine === null) fine = Date.now() + budgetMs;
     return Math.min(TIMEOUT_MS, fine - Date.now());
   }
 
+  // Un modello che ha già sforato una volta non torna vivo dopo mezzo minuto:
+  // le chiamate successive falliscono subito invece di regalargli un altro
+  // timeout intero a testa. Misurato: 10 secondi di analisi vera e 110 di
+  // attesa di un modello che non rispondeva né alla prima né alla seconda.
+  let modelloGiu = false;
+
   // Entrambi i motori rispondono in JSON; cambia solo come glielo si chiede.
   async function chiamaLLM(prompt) {
+    // Prima il tempo, poi lo stato del modello: se sono vere entrambe,
+    // "il tempo è finito" dice all'utente più di "il modello non risponde".
     const ms = msDisponibili();
     if (ms <= 0) throw new BudgetScaduto();
-    return motore === 'openrouter'
-      ? chiamaOpenRouter(prompt, ms)
-      : chiamaOllama(prompt, ms);
+    if (modelloGiu) throw new TimeoutLLM(Math.round(TIMEOUT_MS / 1000));
+    try {
+      return await (motore === 'openrouter'
+        ? chiamaOpenRouter(prompt, ms)
+        : chiamaOllama(prompt, ms));
+    } catch (e) {
+      if (e instanceof TimeoutLLM) modelloGiu = true;
+      throw e;
+    }
   }
 
   async function chiamaOllama(prompt, ms) {

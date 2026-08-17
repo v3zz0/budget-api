@@ -103,21 +103,37 @@ async function test(nome, fn) {
 
   await test('esaurito il budget le chiamate rimaste falliscono subito', async () => {
     global.fetch = fetchCheNonRispondeMai;
-    const llm = llmFactory({ motore: 'ollama', url: 'http://x' });
-    await llm.ping().catch(() => {}); // brucia il budget (120ms)
+    // Budget più corto del timeout: la prima chiamata lo consuma tutto.
+    const llm = llmFactory({ motore: 'ollama', url: 'http://x', budgetMs: 120 });
+    await llm.ping().catch(() => {});
     await pausa(40);
     const inizio = Date.now();
     await assert.rejects(() => llm.ping(), /Tempo massimo/);
     assert.ok(Date.now() - inizio < 50, 'la seconda chiamata non deve nemmeno partire');
   });
 
+  await test('dopo un timeout non regala un altro minuto alla chiamata dopo', async () => {
+    global.fetch = fetchCheNonRispondeMai;
+    // Budget ampio: qui a fermare la seconda chiamata dev'essere il fatto che
+    // il modello ha già sforato, non il tempo finito.
+    const llm = llmFactory({ motore: 'ollama', url: 'http://x', budgetMs: 60000 });
+    await llm.ping().catch(() => {});
+    const inizio = Date.now();
+    await assert.rejects(() => llm.ping(), /non ha risposto entro/);
+    assert.ok(
+      Date.now() - inizio < 50,
+      'la seconda chiamata ha aspettato di nuovo invece di mollare subito'
+    );
+  });
+
   await test('ogni analisi ha il suo budget, non uno condiviso', async () => {
     global.fetch = fetchCheNonRispondeMai;
-    const primo = llmFactory({ motore: 'ollama', url: 'http://x' });
+    const primo = llmFactory({ motore: 'ollama', url: 'http://x', budgetMs: 120 });
     await primo.ping().catch(() => {});
     await pausa(40);
-    // Client nuovo = richiesta nuova: non deve ereditare il budget esaurito.
-    const secondo = llmFactory({ motore: 'ollama', url: 'http://x' });
+    // Client nuovo = richiesta nuova: non deve ereditare né il budget esaurito
+    // né il modello marcato come giù.
+    const secondo = llmFactory({ motore: 'ollama', url: 'http://x', budgetMs: 120 });
     await assert.rejects(() => secondo.ping(), /non ha risposto entro/);
   });
 
