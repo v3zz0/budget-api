@@ -98,3 +98,104 @@ assert.deepStrictEqual(s[2], {
 });
 
 console.log(`OK: formato senza spazi, ${s.length} movimenti`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Secondo formato: "LISTA MOVIMENTI CARTA". Copiato da un PDF vero, comprese
+// le descrizioni spezzate su più righe. L'oracolo è il totale che stampa la
+// banca in fondo: se la somma non fa 770,72 abbiamo perso o inventato righe.
+const CARTA = `
+ Data Operazione Importo in Euro Descrizione Divisa originale Importo originale
+ 26/07/2026 -71,50 DALLA LELLA AL
+MARE SRL RIMINI
+ EUR -71,50
+ 24/07/2026 -18,27 AUTOGRILL 0006
+FIORENZUOLAPC
+ EUR -18,27
+ 24/07/2026 -49,93 SUPERMERCATO
+NOVA COOP -
+TORINO TO
+ EUR -49,93
+ 21/07/2026 -51,60 RISTORANTE
+MEIWEI DI ZHA
+AVIGLIANA
+ EUR -51,60
+ 19/07/2026 -289,96 Sixt DGMRWG6BJ
+Appiano sulla
+ EUR -289,96
+ 19/07/2026 -38,40 DALLA LELLA
+RIMINI RN
+ EUR -38,40
+ 11/07/2026 -88,70 JustEatItaly MILANO EUR -88,70
+ 11/07/2026 -5,00 PUMA S.R.L.
+COLLEGNO TO
+ EUR -5,00
+ 10/07/2026 -2,20 MC DONALD'S
+COLLEGNO TO
+ EUR -2,20
+ 10/07/2026 -3,00 PARCHEGGIO VIA
+ROMA TORINO TO
+ EUR -3,00
+ 05/07/2026 -61,20 OLD WILD WEST
+TORINO TO
+ EUR -61,20
+ 05/07/2026 -17,50 JYSK TORINO IT3
+TORINO
+ EUR -17,50
+ 02/07/2026 -25,90 VODAFONE ADDEB
+CONTO TEL IVREA
+TO
+ EUR -25,90
+ 01/07/2026 -39,20 E J DI ZHENG
+FENGMEI ROSTA
+TO
+ EUR -39,20
+ 29/06/2026 -8,36 PRESTOFRESCO
+SPA
+SANT'ANTONINO
+ EUR -8,36
+Totale speso al 16/08/2026 08:17:31 770,72
+`;
+
+const c = parser.parse(CARTA);
+
+assert.strictEqual(c.length, 15, `attesi 15 movimenti carta, trovati ${c.length}`);
+
+const totaleCarta = c.reduce((s, x) => s + x.importo, 0);
+assert.strictEqual(
+  Number(totaleCarta.toFixed(2)),
+  770.72,
+  `il totale non torna con quello stampato dalla banca: ${totaleCarta.toFixed(2)}`
+);
+
+// Descrizione su più righe, ricomposta.
+assert.deepStrictEqual(c[0], {
+  data: '2026-07-26',
+  importo: 71.5,
+  descrizione: 'DALLA LELLA AL MARE SRL RIMINI',
+});
+
+// Riga singola.
+assert.deepStrictEqual(c[6], {
+  data: '2026-07-11',
+  importo: 88.7,
+  descrizione: 'JustEatItaly MILANO',
+});
+
+// La riga "Totale speso" non deve diventare un movimento.
+assert.ok(!c.some((x) => /Totale/i.test(x.descrizione)), 'riga di totale letta come movimento');
+
+// Stesso formato ma senza spazi fra i campi, come lo produce pdf-parse.
+const CARTA_SENZA_SPAZI = [
+  '26/07/2026-71,50DALLA LELLA AL',
+  'MARE SRL RIMINI',
+  'EUR-71,50',
+  '11/07/2026-88,70JustEatItaly MILANOEUR-88,70',
+].join('\n');
+
+const cs = parser.parse(CARTA_SENZA_SPAZI);
+assert.strictEqual(cs.length, 2, `attesi 2 movimenti, trovati ${cs.length}`);
+assert.strictEqual(cs[0].importo, 71.5);
+assert.strictEqual(cs[0].descrizione, 'DALLA LELLA AL MARE SRL RIMINI');
+assert.strictEqual(cs[1].descrizione, 'JustEatItaly MILANO');
+
+console.log(`OK: formato carta, ${c.length} movimenti, totale ${totaleCarta.toFixed(2)} EUR`);

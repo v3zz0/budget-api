@@ -27,6 +27,20 @@ const MOVIMENTO =
 // Inizio di un nuovo movimento: codice identificativo + data operazione.
 const INIZIO = /^\d{10,20}\s*\d{2}\/\d{2}\/\d{4}/;
 
+// Secondo formato: "LISTA MOVIMENTI CARTA". Stessa banca, tabella diversa —
+// niente codice identificativo, l'importo viene PRIMA della descrizione, e in
+// fondo si ripete in divisa originale:
+//
+//   26/07/2026 -71,50 DALLA LELLA AL MARE SRL RIMINI EUR -71,50
+//   <data op>  <imp>  <descrizione>                  EUR <importo originale>
+//
+// Non può essere confuso col formato conto: lì la riga comincia con 10-20
+// cifre, qui con una data, e una data ha lo slash in terza posizione.
+const MOVIMENTO_CARTA =
+  /^(\d{2}\/\d{2}\/\d{4})\s*([+-][\d.]*\d,\d{2})\s*([\s\S]*?)\s*EUR\s*[+-]?[\d.]*\d,\d{2}\s*$/;
+
+const INIZIO_CARTA = /^\d{2}\/\d{2}\/\d{4}\s*[+-][\d.]*\d,\d{2}/;
+
 // "1.487,00" -> 1487.00   "-4,00" -> -4
 function toNumero(s) {
   return Number(s.replace(/\./g, '').replace(',', '.'));
@@ -52,7 +66,7 @@ module.exports = () => ({
       const t = riga.trim();
       if (!t) continue;
 
-      if (INIZIO.test(t)) {
+      if (INIZIO.test(t) || INIZIO_CARTA.test(t)) {
         buffer = t; // nuovo movimento (se il precedente era incompleto, si scarta)
       } else if (buffer) {
         buffer += ' ' + t; // descrizione andata a capo
@@ -60,19 +74,25 @@ module.exports = () => ({
         continue; // intestazioni, note legali, righe di totale
       }
 
-      const m = buffer.match(MOVIMENTO);
-      if (!m) continue; // movimento non ancora completo: aspetto la riga dopo
+      // I due formati si escludono a vicenda, quindi basta provarli in fila.
+      const conto = buffer.match(MOVIMENTO);
+      const carta = conto ? null : buffer.match(MOVIMENTO_CARTA);
+      if (!conto && !carta) continue; // movimento incompleto: aspetto la riga dopo
       buffer = '';
 
-      const importo = toNumero(m[5]);
+      // Data operazione, non data valuta: è il giorno in cui hai speso.
+      const [data, grezzo, descrizione] = conto
+        ? [conto[2], conto[5], conto[4]]
+        : [carta[1], carta[2], carta[3]];
+
+      const importo = toNumero(grezzo);
       // Solo le spese: accrediti e storni positivi non sono transazioni dell'app.
       if (importo >= 0) continue;
 
       movimenti.push({
-        // Data operazione, non data valuta: è il giorno in cui hai speso.
-        data: toIso(m[2]),
+        data: toIso(data),
         importo: Math.abs(importo),
-        descrizione: m[4].replace(/\s+/g, ' ').trim(),
+        descrizione: descrizione.replace(/\s+/g, ' ').trim(),
       });
     }
 
