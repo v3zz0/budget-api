@@ -20,6 +20,14 @@ const MAX_BLOCCO = 10000;
 // prima di rispondere scrivono un ragionamento che noi buttiamo via.
 const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 60000;
 
+// Tetto all'ANALISI INTERA, non alla singola chiamata. Le chiamate sono in
+// fila: con più blocchi da leggere più le due rifiniture, il solo limite per
+// chiamata lascia comunque passare svariati minuti, e a quel punto l'app ha
+// già chiuso la connessione. Scaduto il budget le chiamate rimaste falliscono
+// subito e il controller consegna il report senza di loro — un report parziale
+// in due minuti vale più di uno completo che non arriva.
+const BUDGET_MS = Number(process.env.AI_BUDGET_MS) || 120000;
+
 // Tetto ai blocchi da mandare al modello quando l'estratto non ha un parser
 // dedicato. Ogni blocco è una chiamata sequenziale: senza un limite, un PDF
 // lungo diventa dieci minuti di attesa e un timeout garantito.
@@ -33,17 +41,44 @@ class TimeoutLLM extends Error {
   }
 }
 
-/** fetch con scadenza: alla scadenza aborta davvero la richiesta. */
-async function fetchConTimeout(url, opzioni) {
+class BudgetScaduto extends Error {
+  constructor() {
+    super('Tempo massimo dell\'analisi esaurito');
+    this.name = 'BudgetScaduto';
+  }
+}
+
+/**
+ * fetch con scadenza che copre ANCHE la lettura del corpo.
+ *
+ * Qui c'era il bug che rendeva il timeout una decorazione: OpenRouter manda gli
+ * header (200 OK) subito e poi genera il testo per minuti. Cancellando il timer
+ * appena tornava la Response, la parte lenta — `await res.json()` — restava
+ * senza limite. Il risultato misurato: 60s dichiarati, 432s reali su
+ * un'analisi, con Strapi che continuava a lavorare dopo che l'app aveva già
+ * mollato. Leggere il corpo dentro la scadenza è tutta la differenza.
+ */
+async function fetchConTimeout(url, opzioni, ms) {
   const controller = new AbortController();
-  const scadenza = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const scadenza = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...opzioni, signal: controller.signal });
+    const res = await fetch(url, { ...opzioni, signal: controller.signal });
+    return { ok: res.ok, status: res.status, corpo: await res.text() };
   } catch (e) {
-    if (e.name === 'AbortError') throw new TimeoutLLM(Math.round(TIMEOUT_MS / 1000));
+    if (e.name === 'AbortError') throw new TimeoutLLM(Math.round(ms / 1000));
     throw e;
   } finally {
     clearTimeout(scadenza);
+  }
+}
+
+/** Il corpo di una risposta ok deve essere JSON: se è la pagina di errore di
+ *  un proxy, dirlo vale più di un "Unexpected token <" in mezzo al report. */
+function jsonDelCorpo(res, motore) {
+  try {
+    return JSON.parse(res.corpo);
+  } catch (_) {
+    throw new Error(`${motore}: risposta non JSON (${res.corpo.slice(0, 120)})`);
   }
 }
 
@@ -66,6 +101,23 @@ function spezza(testo, max = MAX_BLOCCO) {
   return blocchi;
 }
 
+// Un estratto conto è per la maggior parte intestazioni, condizioni, note
+// legali e piè di pagina: righe senza un solo movimento, che però finiscono lo
+// stesso nel prompt e moltiplicano blocchi — cioè chiamate, cioè minuti.
+// Teniamo solo le righe con una data o un importo in formato italiano.
+// Se ne restano pochissime il formato non è quello che ci aspettiamo: meglio
+// mandare tutto che mandare il vuoto.
+// ponytail: una descrizione andata a capo su una riga senza data né importo si
+// perde. Il movimento resta (data e importo stanno sulla riga principale), è la
+// descrizione a risultare più corta. Se servisse intera, tenere anche la riga
+// successiva a ogni riga utile.
+const RIGA_UTILE = /\d{2}\/\d{2}\/\d{4}|\d,\d{2}(\D|$)/;
+
+function soloMovimenti(testo) {
+  const utili = String(testo).split('\n').filter((r) => RIGA_UTILE.test(r));
+  return utili.length >= 3 ? utili.join('\n') : String(testo);
+}
+
 module.exports = (config = {}) => {
   const motore = config.motore === 'openrouter' ? 'openrouter' : 'ollama';
   const url = (config.url || URL_DEFAULT).replace(/\/+$/, '');
@@ -78,14 +130,25 @@ module.exports = (config = {}) => {
   // report possa raccontare.
   const avvisi = [];
 
-  // Entrambi i motori rispondono in JSON; cambia solo come glielo si chiede.
-  async function chiamaLLM(prompt) {
-    return motore === 'openrouter'
-      ? chiamaOpenRouter(prompt)
-      : chiamaOllama(prompt);
+  // Il budget parte alla PRIMA chiamata, non alla creazione del client: il
+  // controller istanzia l'LLM in cima e poi legge PDF e database, e quel tempo
+  // non va addebitato al modello.
+  let fine = null;
+  function msDisponibili() {
+    if (fine === null) fine = Date.now() + BUDGET_MS;
+    return Math.min(TIMEOUT_MS, fine - Date.now());
   }
 
-  async function chiamaOllama(prompt) {
+  // Entrambi i motori rispondono in JSON; cambia solo come glielo si chiede.
+  async function chiamaLLM(prompt) {
+    const ms = msDisponibili();
+    if (ms <= 0) throw new BudgetScaduto();
+    return motore === 'openrouter'
+      ? chiamaOpenRouter(prompt, ms)
+      : chiamaOllama(prompt, ms);
+  }
+
+  async function chiamaOllama(prompt, ms) {
     const res = await fetchConTimeout(`${url}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -96,14 +159,14 @@ module.exports = (config = {}) => {
         format: 'json',
         options: { temperature: 0.1 },
       }),
-    });
+    }, ms);
     if (!res.ok) {
-      throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
+      throw new Error(`Ollama error ${res.status}: ${res.corpo}`);
     }
-    return (await res.json()).response;
+    return jsonDelCorpo(res, 'Ollama').response;
   }
 
-  async function chiamaOpenRouter(prompt) {
+  async function chiamaOpenRouter(prompt, ms) {
     if (!chiave) throw new Error('OpenRouter: chiave API non configurata');
     const res = await fetchConTimeout(`${url}/chat/completions`, {
       method: 'POST',
@@ -117,12 +180,11 @@ module.exports = (config = {}) => {
         response_format: { type: 'json_object' },
         temperature: 0.1,
       }),
-    });
+    }, ms);
     if (!res.ok) {
-      throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
+      throw new Error(`OpenRouter error ${res.status}: ${res.corpo}`);
     }
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
+    return jsonDelCorpo(res, 'OpenRouter').choices?.[0]?.message?.content || '';
   }
 
   async function estraiDaBlocco(testoEstratto, nomiCategorie) {
@@ -177,7 +239,11 @@ Regole:
     // (vedi sella-parser.js) questo non viene nemmeno chiamato.
     async estraiTransazioni(testoEstratto, categorieDisponibili) {
       const nomiCategorie = categorieDisponibili.map((c) => c.Nome).join(', ');
-      const blocchi = spezza(testoEstratto);
+      const utile = soloMovimenti(testoEstratto);
+      strapi.log.info(
+        `Analisi: testo da leggere ${testoEstratto.length} → ${utile.length} caratteri`
+      );
+      const blocchi = spezza(utile);
       const tutte = [];
 
       const daLeggere = Math.min(blocchi.length, MAX_BLOCCHI);
@@ -276,5 +342,6 @@ Rispondi con JSON: { "giudizio": "testo qui" }`;
   };
 };
 
-// Esposta solo per il check in tests/spezza.test.js
+// Esposte solo per i check in tests/spezza.test.js e tests/llm-timeout.test.js
 module.exports.spezza = spezza;
+module.exports.soloMovimenti = soloMovimenti;
