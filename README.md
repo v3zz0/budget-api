@@ -136,9 +136,41 @@ Copiate da `.env.example`. **Nessun valore va committato** (`.env` è in `.gitig
 | `ENCRYPTION_KEY` | Cifratura dei dati Strapi |
 | `DATABASE_*` | Client, host, porta, nome, utente, password del DB |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | (Opzionale) endpoint e modello per l'analisi estratto conto |
+| `AI_TIMEOUT_MS` | (Opzionale) quanto aspettare una risposta del modello, default `60000` |
+| `AI_MAX_BLOCCHI` | (Opzionale) blocchi di testo per documento senza parser dedicato, default `6` |
 
 > ⚠️ **Genera segreti nuovi e casuali** (es. `openssl rand -base64 16`). Non riusare mai
 > valori d'esempio o presi da altri deploy.
+
+### Se l'analisi va in timeout (504)
+
+Un `504 Gateway Time-out` non arriva da Strapi ma dal reverse proxy davanti
+(nginx/openresty), che chiude la connessione prima che l'analisi finisca.
+L'analisi è sincrona e con un modello lento può durare minuti.
+
+Tre leve, in ordine di efficacia:
+
+1. **Usa un modello non "reasoning".** Quelli che ragionano prima di rispondere
+   (`qwen3`, `deepseek-r1`, `o1`…) impiegano molto più tempo e il ragionamento
+   noi lo buttiamo via. Per questo compito vanno benissimo modelli normali tipo
+   `qwen2.5-7b-instruct` o `llama-3.1-8b-instruct`.
+2. **Alza il timeout del reverse proxy.** Il default di nginx è 60s:
+
+   ```nginx
+   location /api/analisi- {
+       proxy_pass http://strapi:1337;
+       proxy_read_timeout 300s;
+       proxy_send_timeout 300s;
+   }
+   ```
+
+3. **Scrivi un parser per la tua banca.** È la soluzione vera: l'estrazione
+   diventa istantanea e il modello serve solo per le rifiniture. Vedi
+   [Scrivere il parser della tua banca](#scrivere-il-parser-della-tua-banca).
+
+Il server comunque non resta più appeso: superato `AI_TIMEOUT_MS` la chiamata
+viene abortita, e i passi opzionali (categorie suggerite e giudizio) vengono
+saltati con un avviso nel report invece di far fallire tutta l'analisi.
 
 ---
 

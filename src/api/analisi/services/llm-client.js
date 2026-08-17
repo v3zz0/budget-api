@@ -12,6 +12,41 @@ const MODELLO_DEFAULT = process.env.OLLAMA_MODEL || 'qwen2.5:7b';
 // Quanto testo passare al modello in una volta sola.
 const MAX_BLOCCO = 10000;
 
+// Quanto aspettare una singola risposta del modello prima di mollare.
+// Senza questo la fetch resta appesa all'infinito: il reverse proxy davanti a
+// Strapi chiude con un 504, il browser vede l'errore, ma il server continua a
+// macinare per conto suo una richiesta che nessuno leggerà più.
+// I modelli "reasoning" (qwen3, o1, deepseek-r1...) sono i più lenti, perché
+// prima di rispondere scrivono un ragionamento che noi buttiamo via.
+const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 60000;
+
+// Tetto ai blocchi da mandare al modello quando l'estratto non ha un parser
+// dedicato. Ogni blocco è una chiamata sequenziale: senza un limite, un PDF
+// lungo diventa dieci minuti di attesa e un timeout garantito.
+// Quando scatta lo si dice nel report, non si taglia in silenzio.
+const MAX_BLOCCHI = Number(process.env.AI_MAX_BLOCCHI) || 6;
+
+class TimeoutLLM extends Error {
+  constructor(secondi) {
+    super(`Il modello non ha risposto entro ${secondi}s`);
+    this.name = 'TimeoutLLM';
+  }
+}
+
+/** fetch con scadenza: alla scadenza aborta davvero la richiesta. */
+async function fetchConTimeout(url, opzioni) {
+  const controller = new AbortController();
+  const scadenza = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...opzioni, signal: controller.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new TimeoutLLM(Math.round(TIMEOUT_MS / 1000));
+    throw e;
+  } finally {
+    clearTimeout(scadenza);
+  }
+}
+
 // Spezza il testo in blocchi, tagliando SOLO a fine riga: un movimento non
 // deve mai finire a cavallo di due blocchi.
 // Prima qui c'era un slice(0, 12000): tutto il resto dell'estratto conto
@@ -37,6 +72,12 @@ module.exports = (config = {}) => {
   const modello = config.modello || MODELLO_DEFAULT;
   const chiave = config.chiave || '';
 
+  // Cose che l'utente deve sapere sul risultato (troncamenti, passi saltati).
+  // Le raccoglie il client e le legge il controller: un limite che scatta senza
+  // dirlo si legge come "ho guardato tutto", ed è la bugia peggiore che un
+  // report possa raccontare.
+  const avvisi = [];
+
   // Entrambi i motori rispondono in JSON; cambia solo come glielo si chiede.
   async function chiamaLLM(prompt) {
     return motore === 'openrouter'
@@ -45,7 +86,7 @@ module.exports = (config = {}) => {
   }
 
   async function chiamaOllama(prompt) {
-    const res = await fetch(`${url}/api/generate`, {
+    const res = await fetchConTimeout(`${url}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -64,7 +105,7 @@ module.exports = (config = {}) => {
 
   async function chiamaOpenRouter(prompt) {
     if (!chiave) throw new Error('OpenRouter: chiave API non configurata');
-    const res = await fetch(`${url}/chat/completions`, {
+    const res = await fetchConTimeout(`${url}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -128,6 +169,9 @@ Regole:
     motore,
     modello,
 
+    /** Avvisi accumulati durante l'analisi, da mostrare nel report. */
+    avvisi: () => [...avvisi],
+
     // Estrae transazioni strutturate dal testo grezzo dell'estratto conto.
     // Fallback per le banche di cui non abbiamo un parser: se il formato è noto
     // (vedi sella-parser.js) questo non viene nemmeno chiamato.
@@ -136,9 +180,21 @@ Regole:
       const blocchi = spezza(testoEstratto);
       const tutte = [];
 
-      for (let i = 0; i < blocchi.length; i++) {
+      const daLeggere = Math.min(blocchi.length, MAX_BLOCCHI);
+      if (blocchi.length > MAX_BLOCCHI) {
+        strapi.log.warn(
+          `Analisi: documento troppo lungo, letti ${MAX_BLOCCHI} blocchi su ${blocchi.length}. ` +
+            `Alza AI_MAX_BLOCCHI o scrivi un parser per questa banca.`
+        );
+        avvisi.push(
+          `Documento troppo lungo: letta solo la prima parte (${MAX_BLOCCHI} blocchi su ${blocchi.length}). ` +
+            `Potrebbero mancare dei movimenti.`
+        );
+      }
+
+      for (let i = 0; i < daLeggere; i++) {
         if (blocchi.length > 1) {
-          strapi.log.info(`Analisi estratto conto: blocco ${i + 1}/${blocchi.length}`);
+          strapi.log.info(`Analisi estratto conto: blocco ${i + 1}/${daLeggere}`);
         }
         tutte.push(...(await estraiDaBlocco(blocchi[i], nomiCategorie)));
       }

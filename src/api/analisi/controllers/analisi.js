@@ -144,14 +144,25 @@ module.exports = {
       // movimenti del primo e il secondo sparirebbe senza un avviso.
       const transazioniBanca = [];
       const fonti = [];
+      const avvisiExtra = [];
       for (const testo of testi) {
         const daParser = sellaParser.parse(testo);
         if (daParser.length) {
           transazioniBanca.push(...daParser);
           fonti.push('sella-parser');
         } else {
-          transazioniBanca.push(...(await llm.estraiTransazioni(testo, categorie)));
-          fonti.push('llm');
+          // Un documento che il modello non riesce a leggere non deve far
+          // fallire anche gli altri: con due estratti caricati insieme, il
+          // secondo va analizzato lo stesso.
+          try {
+            transazioniBanca.push(...(await llm.estraiTransazioni(testo, categorie)));
+            fonti.push('llm');
+          } catch (e) {
+            strapi.log.warn(`Analisi: documento non letto dal modello (${e.message})`);
+            avvisiExtra.push(
+              'Un documento non è stato letto: nessun parser lo riconosce e il modello non ha risposto in tempo.'
+            );
+          }
         }
       }
       const fonte = [...new Set(fonti)].join('+') || 'nessuna';
@@ -170,32 +181,58 @@ module.exports = {
       // Il parser estrae i numeri ma non sa cosa siano: la categoria la
       // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
       // descrizione, non l'estratto conto intero).
+      // I due passi che seguono sono rifiniture: i numeri del report li ha già
+      // prodotti il parser. Se il modello è lento o giù, si consegna il report
+      // senza di loro invece di buttare via tutto il lavoro con un errore.
+      // Prima una qualsiasi di queste chiamate faceva fallire l'intera analisi.
       if (mancanti.some((m) => !m.categoriaSuggerita)) {
-        mancanti = await llm.suggerisciCategorie(mancanti, categorie);
+        try {
+          mancanti = await llm.suggerisciCategorie(mancanti, categorie);
+        } catch (e) {
+          strapi.log.warn(`Analisi: categorie non suggerite (${e.message})`);
+          avvisiExtra.push('Categorie non suggerite: il modello non ha risposto in tempo.');
+        }
       }
 
       const totaleSpeso = sforamenti.reduce((s, c) => s + c.speso, 0);
       const totaleBudget = sforamenti.reduce((s, c) => s + c.budget, 0);
 
       // 7. Giudizio sintetico LLM
-      const giudizio = await llm.giudizioMese({
-        mese,
-        sforamenti,
-        totaleSpeso: Number(totaleSpeso.toFixed(2)),
-        totaleBudget: Number(totaleBudget.toFixed(2)),
-        mancanti,
-      });
+      let giudizio = '';
+      try {
+        giudizio = await llm.giudizioMese({
+          mese,
+          sforamenti,
+          totaleSpeso: Number(totaleSpeso.toFixed(2)),
+          totaleBudget: Number(totaleBudget.toFixed(2)),
+          mancanti,
+        });
+      } catch (e) {
+        strapi.log.warn(`Analisi: giudizio non generato (${e.message})`);
+        avvisiExtra.push('Giudizio non generato: il modello non ha risposto in tempo.');
+      }
 
       // 8. Pulizia file temporanei (best-effort)
       for (const p of daPulire) {
         try { fs.unlinkSync(p); } catch (_) {}
       }
 
+      // Tutto quello che è stato saltato o troncato finisce nel warning che la
+      // app già mostra in cima al report: un report parziale deve dirlo da sé,
+      // altrimenti si legge come completo.
+      const avvisi = [...llm.avvisi(), ...avvisiExtra];
+      const validazioneFinale = avvisi.length
+        ? {
+            ok: validazione.ok,
+            warning: [validazione.warning, ...avvisi].filter(Boolean).join(' · '),
+          }
+        : validazione;
+
       return {
         mese,
         walletId,
         fonte, // "sella-parser" oppure "llm": utile per capire cosa è successo
-        validazione,
+        validazione: validazioneFinale,
         periodoEstratto,
         sforamenti,
         mancanti,
