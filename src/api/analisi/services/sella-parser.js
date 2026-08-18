@@ -41,6 +41,12 @@ const MOVIMENTO_CARTA =
 
 const INIZIO_CARTA = /^\d{2}\/\d{2}\/\d{4}\s*[+-][\d.]*\d,\d{2}/;
 
+// L'addebito mensile della carta di credito sul conto ("VISA CLASSIC GIUGNO")
+// non è una spesa: è la somma delle spese già elencate nell'estratto della
+// carta. Contarlo significa contare due volte lo stesso mese di acquisti.
+// Non lo si butta qui: lo si marca, e chi legge decide (e lo dice all'utente).
+const ADDEBITO_CARTA = /\b(VISA|MASTERCARD|MAESTRO)\b|SALDO CARTA|ADDEBITO CARTA/i;
+
 // "1.487,00" -> 1487.00   "-4,00" -> -4
 function toNumero(s) {
   return Number(s.replace(/\./g, '').replace(',', '.'));
@@ -89,10 +95,14 @@ module.exports = () => ({
       // Solo le spese: accrediti e storni positivi non sono transazioni dell'app.
       if (importo >= 0) continue;
 
+      const pulita = descrizione.replace(/\s+/g, ' ').trim();
       movimenti.push({
         data: toIso(data),
         importo: Math.abs(importo),
-        descrizione: descrizione.replace(/\s+/g, ' ').trim(),
+        descrizione: pulita,
+        // Vale solo per il formato conto: nell'estratto della carta le righe
+        // sono gli acquisti veri, non il loro riepilogo.
+        addebitoCarta: Boolean(conto) && ADDEBITO_CARTA.test(pulita),
       });
     }
 

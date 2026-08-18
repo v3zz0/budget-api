@@ -33,6 +33,7 @@ assert.deepStrictEqual(m[0], {
   data: '2026-07-29',
   importo: 4,
   descrizione: 'COFFEE CAPP BY N AND I POGNANO',
+  addebitoCarta: false,
 });
 
 // "EUR" dentro la descrizione non deve troncare il movimento.
@@ -40,6 +41,7 @@ assert.deepStrictEqual(m[1], {
   data: '2026-07-18',
   importo: 20.36,
   descrizione: 'PAYPAL *ALIPAY EUR 17280818884',
+  addebitoCarta: false,
 });
 
 // Descrizione andata a capo.
@@ -47,6 +49,7 @@ assert.deepStrictEqual(m[2], {
   data: '2026-07-15',
   importo: 555,
   descrizione: 'RATA MUTUO LUIGI GATTI A ALESSANDRO VEZZOLI',
+  addebitoCarta: false,
 });
 
 // Separatore delle migliaia.
@@ -82,6 +85,7 @@ assert.deepStrictEqual(s[0], {
   data: '2026-07-29',
   importo: 4,
   descrizione: 'COFFEE CAPP BY N AND I POGNANO',
+  addebitoCarta: false,
 });
 
 // Il codice identificativo non deve mangiarsi le cifre della data.
@@ -89,12 +93,14 @@ assert.deepStrictEqual(s[1], {
   data: '2026-07-18',
   importo: 20.36,
   descrizione: 'PAYPAL *ALIPAY EUR 17280818884',
+  addebitoCarta: false,
 });
 
 assert.deepStrictEqual(s[2], {
   data: '2026-07-15',
   importo: 555,
   descrizione: 'RATA MUTUO LUIGI GATTI A ALESSANDRO VEZZOLI',
+  addebitoCarta: false,
 });
 
 console.log(`OK: formato senza spazi, ${s.length} movimenti`);
@@ -172,6 +178,7 @@ assert.deepStrictEqual(c[0], {
   data: '2026-07-26',
   importo: 71.5,
   descrizione: 'DALLA LELLA AL MARE SRL RIMINI',
+  addebitoCarta: false,
 });
 
 // Riga singola.
@@ -179,6 +186,7 @@ assert.deepStrictEqual(c[6], {
   data: '2026-07-11',
   importo: 88.7,
   descrizione: 'JustEatItaly MILANO',
+  addebitoCarta: false,
 });
 
 // La riga "Totale speso" non deve diventare un movimento.
@@ -199,3 +207,24 @@ assert.strictEqual(cs[0].descrizione, 'DALLA LELLA AL MARE SRL RIMINI');
 assert.strictEqual(cs[1].descrizione, 'JustEatItaly MILANO');
 
 console.log(`OK: formato carta, ${c.length} movimenti, totale ${totaleCarta.toFixed(2)} EUR`);
+
+// --- Addebito della carta di credito sul conto ---
+// "VISA CLASSIC GIUGNO" non e' una spesa: e' il totale degli acquisti gia'
+// elencati uno per uno nell'estratto della carta. Contarlo raddoppia il mese.
+const CONTO_CON_VISA = [
+  '26001435096898 10/07/2026 10/07/2026 VISA CLASSIC GIUGNO EUR -587,91',
+  '26001435096899 11/07/2026 11/07/2026 JustEatItaly MILANO EUR -88,70',
+].join('\n');
+
+const v = parser.parse(CONTO_CON_VISA);
+assert.strictEqual(v.length, 2, 'entrambi i movimenti vanno letti, poi si filtra');
+assert.strictEqual(v[0].addebitoCarta, true, 'addebito carta non riconosciuto');
+assert.strictEqual(v[1].addebitoCarta, false, 'spesa normale marcata per sbaglio');
+
+// Nell'estratto della CARTA le righe sono acquisti veri: nessuna va esclusa,
+// nemmeno se il negozio si chiamasse "Visa qualcosa".
+const CARTA_CON_VISA = '10/07/2026 -20,00 VISA STORE MILANO EUR -20,00';
+assert.strictEqual(parser.parse(CARTA_CON_VISA)[0].addebitoCarta, false,
+  'un acquisto nell\'estratto carta e\' stato scambiato per un addebito');
+
+console.log('OK: addebito carta riconosciuto solo nel formato conto');

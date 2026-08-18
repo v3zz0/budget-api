@@ -113,17 +113,26 @@ module.exports = {
       const periodoEstratto = pdfParser.estraiPeriodo(testoEstratto);
       const validazione = validaMese(periodoEstratto, mese);
 
-      // 3. Carico categorie del wallet
+      // 3. Carico le categorie di TUTTI i portafogli dell'utente.
+      // L'estratto conto è uno solo — il conto corrente — mentre i portafogli
+      // sono tanti: confrontandolo con un portafoglio per volta, ogni spesa
+      // registrata in un altro risultava "mancante" pur essendo già a posto.
+      // Gli sforamenti restano invece sul portafoglio scelto: un budget ha
+      // senso solo dentro il suo portafoglio.
+      const walletsUtente = await strapi.documents('api::wallet.wallet').findMany({
+        filters: { users_permissions_user: { id: userId } },
+      });
       const categorie = await strapi.documents('api::categorie.categorie').findMany({
-        filters: { wallet: { documentId: walletId } },
+        filters: { wallet: { documentId: { $in: walletsUtente.map((w) => w.documentId) } } },
         populate: ['wallet'],
       });
+      const categorieWallet = categorie.filter((c) => c.wallet?.documentId === walletId);
 
       if (!categorie.length) {
-        return ctx.badRequest('Nessuna categoria trovata per il wallet');
+        return ctx.badRequest('Nessuna categoria trovata');
       }
 
-      // 4. Carico transazioni del wallet per il mese
+      // 4. Carico le transazioni del mese, di tutti i portafogli
       const { primoGiorno, ultimoGiorno } = rangeMese(mese);
       const idsCategorie = categorie.map((c) => c.documentId);
 
@@ -182,9 +191,24 @@ module.exports = {
           }
         }
       }
+      // L'addebito della carta sul conto è il riepilogo di spese già contate
+      // riga per riga nell'estratto della carta: tenerlo raddoppia un mese
+      // intero di acquisti. Si toglie, ma lo si scrive nel report — un
+      // movimento che sparisce in silenzio è peggio di uno di troppo.
+      const giroconti = transazioniBanca.filter((t) => t.addebitoCarta);
+      if (giroconti.length) {
+        const elenco = giroconti.map((g) => `${g.descrizione} (${g.importo}€)`).join(', ');
+        avvisiExtra.push(
+          `Escluso l'addebito della carta di credito: ${elenco}. ` +
+            `Sono spese già presenti nell'estratto della carta.`
+        );
+      }
+      const transazioniConto = transazioniBanca.filter((t) => !t.addebitoCarta);
+
       const fonte = [...new Set(fonti)].join('+') || 'nessuna';
       strapi.log.info(
-        `Analisi: ${transazioniBanca.length} movimenti da ${testi.length} documento/i (${fonte})`
+        `Analisi: ${transazioniConto.length} movimenti da ${testi.length} documento/i (${fonte})` +
+          (giroconti.length ? `, ${giroconti.length} addebiti carta esclusi` : '')
       );
 
       // 6. Diff e sforamenti
@@ -192,8 +216,10 @@ module.exports = {
       // rubano il match a un movimento bancario vero e lo nascondono dai mancanti.
       // Restano invece negli sforamenti: sono spesa a tutti gli effetti.
       const daConfrontare = transazioniDB.filter((t) => !t.Contanti);
-      let { mancanti } = diffEngine.confronta(transazioniBanca, daConfrontare);
-      const sforamenti = diffEngine.calcolaSforamenti(transazioniDB, categorie);
+      let { mancanti } = diffEngine.confronta(transazioniConto, daConfrontare);
+      // Solo le categorie del portafoglio scelto: calcolaSforamenti filtra già
+      // le transazioni per categoria, quindi passargliele tutte è innocuo.
+      const sforamenti = diffEngine.calcolaSforamenti(transazioniDB, categorieWallet);
 
       // Il parser estrae i numeri ma non sa cosa siano: la categoria la
       // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
@@ -253,6 +279,15 @@ module.exports = {
         periodoEstratto,
         sforamenti,
         mancanti,
+        // Tutte le categorie dell'utente, col portafoglio di appartenenza:
+        // servono all'app per registrare un movimento mancante nella categoria
+        // giusta anche quando sta in un altro portafoglio.
+        categorie: categorie.map((c) => ({
+          documentId: c.documentId,
+          nome: c.Nome,
+          icona: c.icona,
+          wallet: c.wallet?.Nome || '',
+        })),
         totale: {
           budget: Number(totaleBudget.toFixed(2)),
           speso: Number(totaleSpeso.toFixed(2)),
