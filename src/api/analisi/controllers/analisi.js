@@ -8,10 +8,17 @@ const pdfParserFactory = require('../services/pdf-parser');
 const llmFactory = require('../services/llm-client');
 const diffFactory = require('../services/diff-engine');
 const sellaFactory = require('../services/sella-parser');
+const autoCategoriaFactory = require('../services/auto-categoria');
 
 const pdfParser = pdfParserFactory();
 const diffEngine = diffFactory();
 const sellaParser = sellaFactory();
+const autoCategoria = autoCategoriaFactory();
+
+// Quanti mesi di storico guardare per dedurre la categoria di un movimento.
+// Un anno copre le spese stagionali (bollette, assicurazione, vacanze) senza
+// tirarsi dietro archeologia.
+const MESI_STORICO = 12;
 
 // Verifica che il wallet sia dell'utente che sta chiamando.
 // Senza questo controllo un utente autenticato potrebbe passare il walletId di
@@ -221,12 +228,47 @@ module.exports = {
       // le transazioni per categoria, quindi passargliele tutte è innocuo.
       const sforamenti = diffEngine.calcolaSforamenti(transazioniDB, categorieWallet);
 
-      // Il parser estrae i numeri ma non sa cosa siano: la categoria la
-      // suggerisce l'LLM, e solo sui pochi movimenti mancanti (poche righe di
-      // descrizione, non l'estratto conto intero).
-      // I due passi che seguono sono rifiniture: i numeri del report li ha già
-      // prodotti il parser. Se il modello è lento o giù, si consegna il report
-      // senza di loro invece di buttare via tutto il lavoro con un errore.
+      // Il parser estrae i numeri ma non sa cosa siano: la categoria va deciso
+      // in due passaggi, dal più economico al più costoso.
+      //
+      // 6a. Prima lo storico: se quel negozio l'hai già categorizzato, la
+      // risposta è nel database e costa una query. Gratis, immediato,
+      // deterministico, e migliora ogni volta che correggi un suggerimento.
+      if (mancanti.some((m) => !m.categoriaSuggerita)) {
+        try {
+          const dalloStorico = new Date(Date.UTC(
+            Number(mese.slice(0, 4)),
+            Number(mese.slice(5, 7)) - 1 - MESI_STORICO,
+            1,
+          )).toISOString().slice(0, 10);
+
+          const storiche = await strapi.documents('api::transazioni.transazioni').findMany({
+            filters: {
+              categorie: { documentId: { $in: idsCategorie } },
+              Data: { $gte: dalloStorico, $lt: primoGiorno },
+            },
+            populate: ['categorie'],
+            limit: -1,
+          });
+
+          const esito = autoCategoria.suggerisci(mancanti, storiche);
+          mancanti = esito.movimenti;
+          if (esito.indovinati) {
+            strapi.log.info(
+              `Analisi: ${esito.indovinati}/${mancanti.length} categorie dedotte dallo storico (${storiche.length} transazioni), senza AI`
+            );
+          }
+        } catch (e) {
+          // Se lo storico non si carica si passa all'LLM come prima: è una
+          // scorciatoia, non un requisito.
+          strapi.log.warn(`Analisi: storico non consultato (${e.message})`);
+        }
+      }
+
+      // 6b. Poi l'LLM, ma solo su quello che è rimasto scoperto — i negozi
+      // mai visti. Il passo è una rifinitura: i numeri del report li ha già
+      // prodotti il parser, quindi se il modello è lento o giù si consegna il
+      // report senza suggerimenti invece di buttare via tutto il lavoro.
       // Prima una qualsiasi di queste chiamate faceva fallire l'intera analisi.
       if (mancanti.some((m) => !m.categoriaSuggerita)) {
         try {

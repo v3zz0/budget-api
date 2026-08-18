@@ -28,16 +28,46 @@ async function testoConsiglio(llm, p, strapi) {
   }
 }
 
+// "2026-09-01" per (2026, 9). Costruita a mano e non con toISOString(): un
+// `new Date(y, m, 1).toISOString()` restituisce il giorno PRIMA appena il
+// container ha un fuso a est di Greenwich. Oggi i container girano in UTC e
+// funziona per caso; basta aggiungere TZ=Europe/Rome al compose per spostare
+// tutte le chiavi mese di un giorno e rompere il salvadanaio in silenzio.
+function primoDelMese(anno, mese) {
+  return `${anno}-${String(mese).padStart(2, "0")}-01`;
+}
+
+// Quanto è stato speso davvero in un wallet, in un intervallo di date.
+// Serve a chiudere il mese: `speso` è l'unico campo del salvadanaio che
+// nessuno riempiva mai, e restando a 0 rendeva muta la card di dettaglio.
+async function spesoDelPeriodo(strapi, walletDocumentId, dal, al) {
+  const categorie = await strapi.documents("api::categorie.categorie").findMany({
+    filters: { wallet: { documentId: walletDocumentId } },
+  });
+  if (!categorie.length) return 0;
+
+  const transazioni = await strapi.documents("api::transazioni.transazioni").findMany({
+    filters: {
+      categorie: { documentId: { $in: categorie.map((c) => c.documentId) } },
+      Data: { $gte: dal, $lte: al },
+    },
+    limit: -1,
+  });
+
+  const totale = transazioni.reduce((s, t) => s + Number(t.Importo || 0), 0);
+  return Number(totale.toFixed(2));
+}
+
 module.exports = {
   register({ strapi }) {
     strapi.cron.add({
-      // A fine mese (ultimo giorno alle 23) creiamo il record del mese
-      // successivo a 0 per ogni wallet, così l'utente lo trova vuoto
-      // pronto per essere modificato a mano. Il record del mese che sta
-      // finendo resta com'è ed entra a far parte dello storico.
-      apriMeseSuccessivo: {
+      // A fine mese (ultimo giorno alle 23) si fanno due cose:
+      //  1. si CHIUDE il mese che finisce, scrivendoci quanto è stato speso
+      //     davvero — `risparmiato` non si tocca mai, quello lo decide l'utente;
+      //  2. si APRE il mese successivo, a zero, pronto da compilare.
+      chiudiEApriMese: {
         task: async ({ strapi }) => {
-          strapi.log.info("Cron apriMeseSuccessivo avviato");
+          strapi.log.info("Cron chiudiEApriMese avviato");
 
           // Verifica che sia davvero l'ultimo giorno del mese
           const oggi = new Date();
@@ -45,14 +75,51 @@ module.exports = {
           domani.setDate(domani.getDate() + 1);
           if (domani.getDate() !== 1) return;
 
-          // Primo giorno del mese successivo (chiave del nuovo record)
-          const primoMeseProssimo = new Date(domani.getFullYear(), domani.getMonth(), 1);
-          const meseISO = primoMeseProssimo.toISOString().split("T")[0];
+          // Mese che sta finendo e mese che si apre
+          const meseCorrenteISO = primoDelMese(oggi.getFullYear(), oggi.getMonth() + 1);
+          const ultimoGiorno = `${meseCorrenteISO.slice(0, 8)}${String(oggi.getDate()).padStart(2, "0")}`;
+          const meseISO = primoDelMese(domani.getFullYear(), domani.getMonth() + 1);
 
           const wallets = await strapi.entityService.findMany("api::wallet.wallet");
 
           for (const wallet of wallets) {
-            // Se già esiste un record per quel mese, non ricreare
+            // ── 1. Chiusura del mese che finisce ──────────────────────────
+            const speso = await spesoDelPeriodo(
+              strapi,
+              wallet.documentId,
+              meseCorrenteISO,
+              ultimoGiorno,
+            );
+            const daChiudere = await strapi.entityService.findMany(
+              "api::salvadanaio.salvadanaio",
+              { filters: { wallet: wallet.id, mese: meseCorrenteISO } },
+            );
+
+            if (daChiudere.length > 0) {
+              await strapi.entityService.update(
+                "api::salvadanaio.salvadanaio",
+                daChiudere[0].id,
+                { data: { speso } },
+              );
+            } else {
+              // Il mese non era mai stato aperto (primo giro, o wallet creato
+              // a metà mese): lo si scrive comunque, o quel mese sparisce
+              // dallo storico.
+              await strapi.entityService.create("api::salvadanaio.salvadanaio", {
+                data: {
+                  mese: meseCorrenteISO,
+                  budgetAllocato: wallet.Budget || 0,
+                  speso,
+                  risparmiato: 0,
+                  wallet: wallet.id,
+                },
+              });
+            }
+            strapi.log.info(
+              `Salvadanaio chiuso per wallet "${wallet.Nome}" - Mese ${meseCorrenteISO} (speso=${speso})`,
+            );
+
+            // ── 2. Apertura del mese successivo ───────────────────────────
             const esistente = await strapi.entityService.findMany(
               "api::salvadanaio.salvadanaio",
               { filters: { wallet: wallet.id, mese: meseISO } },
@@ -109,15 +176,23 @@ module.exports = {
             });
 
             for (const p of proposte) {
-              // Un consiglio ignorato non si ripresenta identico il mese dopo:
-              // altrimenti la campanella diventa rumore e si smette di guardarla.
+              // Un consiglio già in lista non si ripresenta identico il mese
+              // dopo: altrimenti la campanella diventa rumore e si smette di
+              // guardarla.
+              //
+              // "letto" DEVE stare qui dentro: aprire la schermata dei consigli
+              // marca automaticamente tutto come letto, quindi senza di lui un
+              // consiglio guardato ma non applicato né ignorato veniva ricreato
+              // identico ogni fine mese, e la lista si riempiva di doppioni.
+              // "applicato" resta fuori apposta: lì il budget è cambiato, e se
+              // la proposta ricompare vuol dire che serve davvero.
               const scartati = await strapi.entityService.findMany(
                 "api::consiglio.consiglio",
                 {
                   filters: {
                     categorie: p.categoria.id,
                     tipo: p.tipo,
-                    stato: { $in: ["ignorato", "nuovo"] },
+                    stato: { $in: ["ignorato", "nuovo", "letto"] },
                   },
                   limit: 1,
                 },
