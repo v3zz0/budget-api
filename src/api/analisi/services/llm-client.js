@@ -119,7 +119,8 @@ function soloMovimenti(testo) {
 }
 
 module.exports = (config = {}) => {
-  const motore = config.motore === 'openrouter' ? 'openrouter' : 'ollama';
+  const raw = config.motore === 'openrouter' ? 'openrouter' : config.motore === 'llamacpp' ? 'llamacpp' : 'ollama';
+  const motore = raw;
   const url = (config.url || URL_DEFAULT).replace(/\/+$/, '');
   const modello = config.modello || MODELLO_DEFAULT;
   const chiave = config.chiave || '';
@@ -156,7 +157,9 @@ module.exports = (config = {}) => {
     try {
       return await (motore === 'openrouter'
         ? chiamaOpenRouter(prompt, ms)
-        : chiamaOllama(prompt, ms));
+        : motore === 'llamacpp'
+          ? chiamaLlamaCpp(prompt, ms)
+          : chiamaOllama(prompt, ms));
     } catch (e) {
       if (e instanceof TimeoutLLM) modelloGiu = true;
       throw e;
@@ -179,6 +182,27 @@ module.exports = (config = {}) => {
       throw new Error(`Ollama error ${res.status}: ${res.corpo}`);
     }
     return jsonDelCorpo(res, 'Ollama').response;
+  }
+
+  async function chiamaLlamaCpp(prompt, ms) {
+    // llama.cpp server espone un'API OpenAI-compatibile su /v1/chat/completions.
+    // Di default non serve chiave API: il server gira in locale.
+    const headers = { 'Content-Type': 'application/json' };
+    if (chiave) headers.Authorization = `Bearer ${chiave}`;
+    const res = await fetchConTimeout(`${url}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: modello,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      }),
+    }, ms);
+    if (!res.ok) {
+      throw new Error(`llama.cpp error ${res.status}: ${res.corpo}`);
+    }
+    return jsonDelCorpo(res, 'llama.cpp').choices?.[0]?.message?.content || '';
   }
 
   async function chiamaOpenRouter(prompt, ms) {
@@ -357,6 +381,14 @@ Rispondi con JSON: { "giudizio": "testo qui" }`;
   };
 };
 
+// La chiave la differenzia il motore: openrouter e llama.cpp sono servizi
+// diversi (locale l'uno, cloud l'altro), condividere il campo significherebbe
+// perdere una chiave ogni volta che si cambia motore.
+function chiaveDiUtente(user, motore) {
+  return motore === 'llamacpp' ? user?.aiChiaveLlamacpp : user?.aiChiave;
+}
+
 // Esposte solo per i check in tests/spezza.test.js e tests/llm-timeout.test.js
 module.exports.spezza = spezza;
 module.exports.soloMovimenti = soloMovimenti;
+module.exports.chiaveDiUtente = chiaveDiUtente;

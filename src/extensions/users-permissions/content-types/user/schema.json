@@ -71,7 +71,7 @@
     },
     "aiMotore": {
       "type": "enumeration",
-      "enum": ["ollama", "openrouter"],
+      "enum": ["ollama", "openrouter", "llamacpp"],
       "default": "ollama"
     },
     "aiUrl": {
@@ -85,6 +85,14 @@
       "private": true
     },
     "aiChiaveImpostata": {
+      "type": "boolean",
+      "default": false
+    },
+    "aiChiaveLlamacpp": {
+      "type": "string",
+      "private": true
+    },
+    "aiChiaveLlamacppImpostata": {
       "type": "boolean",
       "default": false
     }

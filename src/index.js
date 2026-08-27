@@ -172,7 +172,7 @@ module.exports = {
               motore: utente?.aiMotore,
               url: utente?.aiUrl,
               modello: utente?.aiModello,
-              chiave: utente?.aiChiave,
+              chiave: llmFactory.chiaveDiUtente(utente, utente?.aiMotore),
             });
 
             for (const p of proposte) {

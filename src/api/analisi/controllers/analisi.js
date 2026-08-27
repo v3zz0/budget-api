@@ -37,11 +37,12 @@ async function walletDelloUtente(documentId, userId) {
 // Impostazioni AI dell'utente (scelte dall'app). Se non ha mai configurato
 // niente resta il comportamento storico: Ollama con le variabili d'ambiente.
 function configAi(user) {
+  const motore = user?.aiMotore || 'ollama';
   return {
-    motore: user?.aiMotore || 'ollama',
+    motore,
     url: user?.aiUrl,
     modello: user?.aiModello,
-    chiave: user?.aiChiave,
+    chiave: llmFactory.chiaveDiUtente(user, motore),
   };
 }
 
@@ -354,7 +355,7 @@ module.exports = {
         modello,
         // Chiave vuota nel form = usa quella già salvata (non la rimandiamo
         // mai all'app, quindi il campo arriva vuoto se non l'hai ritoccata).
-        chiave: chiave || ctx.state.user?.aiChiave,
+        chiave: chiave || llmFactory.chiaveDiUtente(ctx.state.user, motore),
       });
       const ok = await llm.ping();
       return {
