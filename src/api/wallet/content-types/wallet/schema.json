@@ -36,6 +36,10 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user"
+    },
+    "escludiDaStatistiche": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

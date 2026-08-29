@@ -158,7 +158,13 @@ module.exports = {
           const motore = require("./api/consiglio/services/motore-consigli")();
           const llmFactory = require("./api/analisi/services/llm-client");
 
+          // I portafogli esclusi dalle statistiche restano fuori anche da qui:
+          // servono come promemoria di scadenze (mutuo, IMU), non come spesa
+          // corrente, e un consiglio del tipo "alza il budget del mutuo" non
+          // ha senso. Il flag sta sul wallet e non sul telefono proprio perche'
+          // questo cron gira sul server e una preferenza locale non la vedrebbe.
           const wallets = await strapi.entityService.findMany("api::wallet.wallet", {
+            filters: { escludiDaStatistiche: { $ne: true } },
             populate: ["users_permissions_user"],
           });
 
