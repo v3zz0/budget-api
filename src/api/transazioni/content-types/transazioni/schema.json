@@ -36,6 +36,11 @@
     "Contanti": {
       "type": "boolean",
       "default": false
+    },
+    "ClientUuid": {
+      "type": "string",
+      "unique": true,
+      "private": false
     }
   }
 }

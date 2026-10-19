@@ -69,11 +69,29 @@ module.exports = createCoreController(UID, ({ strapi }) => ({
     const userId = ctx.state.user && ctx.state.user.id;
     if (!userId) return ctx.unauthorized();
 
-    const catRef = ctx.request.body && ctx.request.body.data && ctx.request.body.data.categorie;
+    const data = ctx.request.body && ctx.request.body.data;
+    const catRef = data && data.categorie;
     if (!catRef) return ctx.badRequest('Categoria mancante');
 
     const cat = await categoriaDelloUtente(strapi, catRef, userId);
     if (!cat) return ctx.forbidden('Categoria non accessibile');
+
+    // Invio da telefono creato offline: se la stessa transazione (stesso
+    // ClientUuid) è già stata salvata in un tentativo precedente la cui
+    // risposta si è persa per strada, si ritorna quella invece di duplicarla.
+    const clientUuid = data.ClientUuid;
+    if (clientUuid) {
+      const esistente = await strapi.documents(UID).findFirst({
+        filters: { ClientUuid: { $eq: clientUuid } },
+        populate: { categorie: { populate: { wallet: { populate: { users_permissions_user: true } } } } },
+      });
+      const proprietario = esistente?.categorie?.wallet?.users_permissions_user;
+      if (esistente && proprietario && proprietario.id === userId) {
+        ctx.status = 200;
+        const sanitized = await this.sanitizeOutput(esistente, ctx);
+        return this.transformResponse(sanitized);
+      }
+    }
 
     return super.create(ctx);
   },
